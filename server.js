@@ -84,7 +84,7 @@ async function startServer() {
     await initializeOracle();
     
     // Start Express server
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log('🚀 Bank Inquired API server started successfully!');
       console.log(`📍 Server running on port ${PORT}`);
       console.log(`🔗 Health check: http://localhost:${PORT}/health`);
