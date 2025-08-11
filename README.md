@@ -141,13 +141,26 @@ Inquire about a transaction status.
 }
 ```
 
-✅ Transaction Found (MSG_TYPE = 421):
+✅ Transaction Found (MSG_TYPE = 1200, WORK_PROGRESS = S):
 ```json
 {
   "Result": [
     {
       "Code": "R3",
       "Message": "Transaction is already Processed",
+      "TransactionType": "DEBIT"
+    }
+  ]
+}
+```
+
+❌ Transaction Failed (MSG_TYPE = 1200, WORK_PROGRESS = F):
+```json
+{
+  "Result": [
+    {
+      "Code": "R1",
+      "Message": "Transaction Failed",
       "TransactionType": "DEBIT"
     }
   ]

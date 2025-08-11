@@ -30,15 +30,23 @@ function validateSTAN(stan) {
 
 // Validate TXNAMT (12 digits, can be all zeros)
 function validateTXNAMT(txnamt) {
-  if (!txnamt || typeof txnamt !== 'string') {
+  if (txnamt === undefined || txnamt === null || (typeof txnamt !== 'string' && typeof txnamt !== 'number')) {
     return { isValid: false, error: 'E4', message: 'Please check TXNAMT' };
   }
-  
-  // Check if it's exactly 12 digits (can be all zeros)
-  if (!/^\d{12}$/.test(txnamt)) {
+
+  // Convert to string for validation
+  const txnamtStr = String(txnamt);
+
+  // Check if it's a positive integer (no decimals, no negative)
+  if (!/^[0-9]+$/.test(txnamtStr)) {
     return { isValid: false, error: 'E4', message: 'Please check TXNAMT' };
   }
-  
+
+  // Optionally, you can set a max length (e.g., up to 9 digits before formatting)
+  if (txnamtStr.length > 9) {
+    return { isValid: false, error: 'E4', message: 'Please check TXNAMT' };
+  }
+
   return { isValid: true };
 }
 

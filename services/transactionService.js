@@ -16,9 +16,25 @@ class TransactionService {
     // Convert date from DD-MM-YYYY to DDMMYY format
     const convertedDate = this.convertDateForDatabase(SETLDATE);
     
+    // Format STAN to 6 digits: left-pad with zeros
+    const formattedSTAN = String(STAN).padStart(6, '0');
+
+    // Format TXNAMT to 12 digits: remove leading zeros, append three zeros, left-pad with zeros
+    let formattedAmount = String(TXNAMT).replace(/^0+/, '');
+    formattedAmount += '000';
+    formattedAmount = formattedAmount.padStart(12, '0');
+    
+    console.log('💰 Amount formatting:', {
+      original: TXNAMT,
+      afterRemoveLeadingZeros: String(TXNAMT).replace(/^0+/, ''),
+      afterAddingThreeZeros: String(TXNAMT).replace(/^0+/, '') + '000',
+      final: formattedAmount
+    });
+    console.log('🔢 STAN formatting:', { original: STAN, final: formattedSTAN });
+
     const query = `
       SELECT 
-        RRN, STAN, TXN_AMT, TERM_ID, SETL_DATE, MSG_TYPE, FROM_ACC, TO_ACC
+        RRN, STAN, TXN_AMT, TERM_ID, SETL_DATE, MSG_TYPE, FROM_ACC, TO_ACC, WORK_PROGRESS
       FROM flxcubp.SWTB_TXN_LOG
       WHERE 
         RRN = :1 AND 
@@ -28,7 +44,7 @@ class TransactionService {
         SETL_DATE =:5
     `;
     
-    const bindParams = [RRN, STAN, TXNAMT, TERMID, convertedDate];
+    const bindParams = [RRN, formattedSTAN, formattedAmount, TERMID, convertedDate];
     
     let connection;
     try {
@@ -116,36 +132,31 @@ class TransactionService {
     // Single transaction case
     const transaction = transactions[0];
     const msgType = transaction.MSG_TYPE;
+    const workProgress = transaction.WORK_PROGRESS;
     
     // Determine transaction type (DEBIT/CREDIT) based on business logic
     const transactionType = this.determineTransactionType(transaction);
     
-    if (msgType === '420') {
-      return {
-        Result: [{
-          Code: 'R2',
-          Message: 'Transaction is already Reversed',
-          TransactionType: transactionType
-        }]
-      };
-    } else if (msgType === '1200') {
-      return {
-        Result: [{
-          Code: 'R3',
-          Message: 'Transaction is already Processed',
-          TransactionType: transactionType
-        }]
-      };
-    } else {
-      // Default case for other MSG_TYPE values
-      return {
-        Result: [{
-          Code: 'R1',
-          Message: 'Transaction is Failed',
-          TransactionType: transactionType
-        }]
-      };
-    }
+   if (msgType === '1200') {
+      // Handle MSG_TYPE 1200 based on WORK_PROGRESS
+      if (workProgress === 'F') {
+        return {
+          Result: [{
+            Code: 'R1',
+            Message: 'Transaction Failed',
+            TransactionType: transactionType
+          }]
+        };
+      } else if (workProgress === 'S') {
+        return {
+          Result: [{
+            Code: 'R3',
+            Message: 'Transaction is already Processed',
+            TransactionType: transactionType
+          }]
+        };
+      } 
+    } 
   }
   
   /**
