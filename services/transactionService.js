@@ -137,7 +137,7 @@ class TransactionService {
     // Determine transaction type (DEBIT/CREDIT) based on business logic
     const transactionType = this.determineTransactionType(transaction);
     
-   if (msgType === '1200') {
+    if (msgType === '1200') {
       // Handle MSG_TYPE 1200 based on WORK_PROGRESS
       if (workProgress === 'F') {
         return {
@@ -155,8 +155,8 @@ class TransactionService {
             TransactionType: transactionType
           }]
         };
-      } 
-    } 
+      }
+    }
   }
   
   /**
