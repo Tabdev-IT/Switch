@@ -2,17 +2,19 @@ const oracledb = require('oracledb');
 require('dotenv').config();
 const log = require('./logger');
 
+const { dbConfig } = require('../config/database');
+
 class Oracle {
     constructor() {
         this.config = {
-            user: process.env.ORACLE_USER,
-            password: process.env.ORACLE_PASSWORD,
-            connectString: process.env.ORACLE_CONNECT_STRING,
-            poolMin: parseInt(process.env.ORACLE_POOL_MIN) || 2,
-            poolMax: parseInt(process.env.ORACLE_POOL_MAX) || 10,
-            poolIncrement: parseInt(process.env.ORACLE_POOL_INCREMENT) || 1,
-            poolTimeout: parseInt(process.env.ORACLE_POOL_TIMEOUT) || 60,
-            queueTimeout: parseInt(process.env.ORACLE_QUEUE_TIMEOUT) || 60000,
+            user: process.env.ORACLE_USER || dbConfig.user,
+            password: process.env.ORACLE_PASSWORD || dbConfig.password,
+            connectString: process.env.ORACLE_CONNECT_STRING || dbConfig.connectString,
+            poolMin: parseInt(process.env.ORACLE_POOL_MIN) || dbConfig.poolMin || 2,
+            poolMax: parseInt(process.env.ORACLE_POOL_MAX) || dbConfig.poolMax || 10,
+            poolIncrement: parseInt(process.env.ORACLE_POOL_INCREMENT) || dbConfig.poolIncrement || 1,
+            poolTimeout: parseInt(process.env.ORACLE_POOL_TIMEOUT) || dbConfig.poolTimeout || 60,
+            queueTimeout: parseInt(process.env.ORACLE_QUEUE_TIMEOUT) || dbConfig.queueTimeout || 60000,
             _enableStats: true
         };
         this.pool = null;
