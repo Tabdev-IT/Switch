@@ -12,23 +12,38 @@
     "pm2:delete": "pm2 delete ecosystem.config.js",
     "pm2:logs": "pm2 logs",
     "pm2:status": "pm2 status",
-    "test": "node test/test-api.js"
+    "test": "node test/test-api.js",
+    "test:webhook": "node test/test-webhook.js",
+    "webhook:generate": "node utils/webhookTest.js"
   },
-  "keywords": ["bank", "api", "oracle", "express", "transaction"],
+  "keywords": [
+    "bank",
+    "api",
+    "oracle",
+    "express",
+    "transaction"
+  ],
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
+    "axios": "^1.6.0",
     "body-parser": "^1.20.2",
-    "oracledb": "^6.3.0",
     "cors": "^2.8.5",
-    "helmet": "^7.1.0"
+    "dotenv": "^17.3.1",
+    "express": "^4.18.2",
+    "gsm": "^0.1.4",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "lodash": "^4.17.21",
+    "mongoose": "^8.0.0",
+    "oracledb": "^6.3.0",
+    "smpp": "^0.6.0-rc.4",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2",
-    "axios": "^1.6.0"
+    "nodemon": "^3.0.2"
   },
   "engines": {
     "node": ">=16.0.0"
   }
-} 
+}

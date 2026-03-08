@@ -2,6 +2,9 @@ const oracledb = require('oracledb');
 
 // Oracle Database Configuration
 const dbConfig = {
+  // user: 'cbl_user',
+  // password: 'Tabcbl_2024',
+  // connectString: `(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=192.168.1.187)(PORT=1521))(CONNECT_DATA=(SERVER=DEDICATED)(SID=abobppd)))`,
   user: 'cbl_user',
   password: 'Tabcbl_2024',
   connectString: `(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=10.100.30.1)(PORT=1521))(CONNECT_DATA=(SERVER=DEDICATED)(SID=tabpubs1)))`,
@@ -19,7 +22,7 @@ async function initializeOracle() {
     // Set Oracle Client configuration
     oracledb.autoCommit = true;
     oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
-    
+
     // Create connection pool
     await oracledb.createPool(dbConfig);
     console.log('✅ Oracle connection pool created successfully');

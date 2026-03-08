@@ -10,6 +10,8 @@ A Node.js Express API for inquiring bank transactions with Oracle database integ
 - **Security**: CORS, Helmet, and other security middleware
 - **Logging**: Detailed request/response logging
 - **PM2 Support**: Production-ready PM2 configuration
+- **SMPP Integration**: SMS services via Libyana and Almadar providers
+- **Webhook Support**: Receive transaction status updates from bank/FI systems
 
 ## 📋 Prerequisites
 
@@ -62,13 +64,7 @@ source ~/.bashrc
 
 The Oracle database configuration is in `config/database.js`:
 
-```javascript
-const dbConfig = {
-  user: 'cbl_user',
-  password: 'Tabcbl_2024',
-  connectString: '10.100.30.1/tabpubs1',
-  // ... other settings
-};
+```
 ```
 
 ### Environment Variables
@@ -78,6 +74,7 @@ Create a `.env` file (optional):
 ```env
 NODE_ENV=production
 PORT=3000
+WEBHOOK_BEARER_TOKEN=your-secure-bearer-token-here
 ```
 
 ## 🚀 Running the Application
@@ -261,7 +258,9 @@ pm2 web
 
 ## 📊 Testing
 
-### Using curl
+### Testing Transaction Inquiry API
+
+#### Using curl
 
 ```bash
 curl -X POST http://localhost:3000/api/inquired \
@@ -280,6 +279,36 @@ curl -X POST http://localhost:3000/api/inquired \
       }
     }
   }'
+```
+
+### Testing Webhook Endpoint
+
+#### Using curl
+
+```bash
+# Test successful transaction webhook
+curl --location 'http://localhost:3000/webhooks' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer your-secure-bearer-token-here' \
+--data '{
+  "webhook": "transaction_status_update",
+  "data": {
+    "payment_reference": "REF123456789",
+    "status": "completed",
+    "status_code": "04",
+    "amount": {
+      "amount": "50000",
+      "currency": "LYD"
+    }
+  }
+}'
+```
+
+#### Using the Webhook Test Utility
+
+```bash
+# Generate test scenarios and cURL commands
+node utils/webhookTest.js
 ```
 
 ### Using Postman
@@ -314,13 +343,19 @@ curl -X POST http://localhost:3000/api/inquired \
 
 ```
 ├── config/
-│   └── database.js          # Oracle database configuration
+│   ├── database.js          # Oracle database configuration
+│   ├── smpp.js             # SMPP provider configuration
+│   └── webhook.js          # Webhook configuration
 ├── routes/
-│   └── inquired.js          # API route handlers
+│   ├── inquired.js          # Transaction inquiry API routes
+│   ├── sms.js              # SMS service routes
+│   └── webhook.js          # Webhook endpoint routes
 ├── services/
-│   └── transactionService.js # Business logic
+│   ├── transactionService.js # Transaction business logic
+│   └── smppService.js       # SMPP SMS service
 ├── utils/
-│   └── validation.js        # Input validation
+│   ├── validation.js        # Input validation
+│   └── webhookTest.js       # Webhook testing utility
 ├── logs/                    # Log files (created automatically)
 ├── ecosystem.config.js      # PM2 configuration
 ├── package.json            # Dependencies and scripts
@@ -339,6 +374,91 @@ curl -X POST http://localhost:3000/api/inquired \
 ## 📄 License
 
 This project is licensed under the MIT License.
+
+## Webhook Integration
+
+### Overview
+The system supports webhook notifications for real-time transaction updates from bank/FI systems.
+
+### Supported Webhook Types
+
+#### 1. Transaction Status Update (`transaction_status_update`)
+Notifies about the status changes of outgoing transactions (completed, failed, declined, pending, cancelled).
+
+**Payload Example:**
+```json
+{
+  "webhook": "transaction_status_update",
+  "data": {
+    "payment_reference": "REF123456789",
+    "status": "completed",
+    "status_code": "04",
+    "amount": {
+      "amount": "50000",
+      "currency": "LYD"
+    }
+  }
+}
+```
+
+#### 2. Transaction Credit Notice (`transaction_credit_notice`)
+Notifies about incoming transfers (حوالة واردة) to creditor accounts.
+
+**Payload Example:**
+```json
+{
+  "webhook": "transaction_credit_notice",
+  "data": {
+    "amount": {
+      "amount": "50000",
+      "currency": "LYD",
+      "fees": "2500"
+    },
+    "debtor_account": {
+      "scheme_name": "IBAN",
+      "identification": "LY5800285100012443402016",
+      "name": "MOHAMMED ALTALEESI"
+    },
+    "debtor_bank": {
+      "name": "Bank of Debtor",
+      "code": "025"
+    },
+    "creditor_account": {
+      "scheme_name": "IBAN",
+      "identification": "IT60X0542811101000000123456"
+    },
+    "creditor_bank": {
+      "name": "Bank of Creditor",
+      "code": "ICICITBB"
+    },
+    "numo_credit_notice": {
+      "rnn": "RNN12345"
+    },
+    "payment_reference": "REF12345-6789-IRKAS-48224222"
+  }
+}
+```
+
+### Authentication
+- **Bearer Token**: Required in Authorization header
+- **HMAC Signature**: Required in Signature header for request integrity
+
+### Configuration
+Set these environment variables:
+```bash
+WEBHOOK_BEARER_TOKEN=your_bearer_token_here
+WEBHOOK_HMAC_SECRET=your_hmac_secret_here
+```
+
+### Testing
+
+Use the built-in testing utility:
+
+```bash
+node utils/webhookTest.js
+```
+
+This will generate test payloads and cURL commands for all webhook scenarios.
 
 ## 📞 Support
 
