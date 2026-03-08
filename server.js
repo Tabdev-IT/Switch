@@ -8,8 +8,8 @@ const { initializeOracle, closePool } = require('./config/database');
 // Import routes
 const inquiredRoutes = require('./routes/inquired');
 // const smsRoutes = require('./routes/sms');
-const webhookRoutes = require('./routes/webhook');
-const fxHouseRoutes = require('./routes/fxHouse');
+// const webhookRoutes = require('./routes/webhook');
+// const fxHouseRoutes = require('./routes/fxHouse');
 const authRoutes = require('./routes/auth');
 const oracle = require('./utils/Oracle');
 
