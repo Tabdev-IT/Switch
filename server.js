@@ -3,7 +3,7 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const helmet = require('helmet');
 const { initializeOracle, closePool } = require('./config/database');
-const { connectMongoDB, disconnectMongoDB } = require('./config/mongodb');
+// const { connectMongoDB, disconnectMongoDB } = require('./config/mongodb');
 
 // Import routes
 const inquiredRoutes = require('./routes/inquired');
@@ -97,14 +97,14 @@ app.use((error, req, res, next) => {
 process.on('SIGTERM', async () => {
   console.log('🛑 SIGTERM received, shutting down gracefully...');
   await closePool();
-  await disconnectMongoDB();
+  // await disconnectMongoDB();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   console.log('🛑 SIGINT received, shutting down gracefully...');
   await closePool();
-  await disconnectMongoDB();
+  // await disconnectMongoDB();
   process.exit(0);
 });
 
@@ -123,9 +123,9 @@ async function startServer() {
     console.log('✅ Legacy Oracle connection initialized');
 
     // Initialize MongoDB connection
-    console.log('⏳ Connecting to MongoDB...');
-    await connectMongoDB();
-    console.log('✅ MongoDB connected');
+    // console.log('⏳ Connecting to MongoDB...');
+    // await connectMongoDB();
+    // console.log('✅ MongoDB connected');
 
     // Start Express server
     app.listen(PORT, '0.0.0.0', () => {
