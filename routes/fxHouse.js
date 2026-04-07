@@ -5,17 +5,33 @@ const fxHouseService = require('../services/fxHouseService');
 const log = require('../utils/logger');
 
 /**
+ * GET /api/fx/accounts
+ * Returns account numbers for the authenticated customer (so clients can then call /balance?account_number=...).
+ */
+router.get('/accounts', authService.authenticate, async (req, res) => {
+    log(`📥 API Route: Listing accounts for customer ${req.customerNumber}`);
+    try {
+        const accountNumbers = await fxHouseService.getAccountNumbersForCustomer(req.customerNumber);
+        res.json({ account_numbers: accountNumbers });
+    } catch (error) {
+        console.error('❌ Error listing FX accounts:', error);
+        res.status(500).json({ error: 'Internal Server Error', message: error.message });
+    }
+});
+
+/**
  * GET /api/fx/balance
- * Returns FX House balance for LYD and USD
+ * Bearer token → customer number → find his accounts (USD, LYD, etc.) → balance for each
+ * is read from STTM_ACCOUNT_BALANCE by CUST_AC_NO (account number), like tab-backend.
+ * No query params required.
  */
 router.get('/balance', authService.authenticate, async (req, res) => {
-    log(`📥 API Route: Handling balance request for ${req.customerNumber}`);
+    log(`📥 API Route: Balance for customer ${req.customerNumber}`);
     try {
         const accounts = await fxHouseService.getAllBalances(req.customerNumber);
-
         res.json({
             customer_number: req.customerNumber,
-            accounts: accounts.map(acc => ({
+            accounts: (accounts || []).map(acc => ({
                 account_number: acc.CUST_AC_NO,
                 currency: acc.CCY,
                 balance: acc.BALANCE
@@ -66,18 +82,54 @@ router.get('/statement/:currency', authService.authenticate, async (req, res) =>
             next: current_page < last_page ? buildUrl(current_page + 1) : null
         };
 
-        // Build the links array for the meta section
+        // Build links array for the meta section similar to FCMS style:
+        // previous, first 10 pages, optional "...", last 2 pages, then next.
         const metaLinks = [];
         metaLinks.push({ url: links.prev, label: "&laquo; السابق", active: false });
 
-        for (let i = 1; i <= last_page; i++) {
+        if (last_page <= 10) {
+            // If total pages are 10 or less, show all
+            for (let i = 1; i <= last_page; i++) {
+                metaLinks.push({
+                    url: buildUrl(i),
+                    label: i.toString(),
+                    active: i === current_page
+                });
+            }
+        } else {
+            const maxInitial = 10;
+            // First 10 pages
+            for (let i = 1; i <= maxInitial; i++) {
+                metaLinks.push({
+                    url: buildUrl(i),
+                    label: i.toString(),
+                    active: i === current_page
+                });
+            }
+
+            // Ellipsis entry
             metaLinks.push({
-                url: buildUrl(i),
-                label: i.toString(),
-                active: i === current_page
+                url: null,
+                label: "...",
+                active: false
+            });
+
+            // Last two pages (avoid duplicates if they overlap with first 10)
+            if (last_page - 1 > maxInitial) {
+                metaLinks.push({
+                    url: buildUrl(last_page - 1),
+                    label: (last_page - 1).toString(),
+                    active: (last_page - 1) === current_page
+                });
+            }
+            metaLinks.push({
+                url: buildUrl(last_page),
+                label: last_page.toString(),
+                active: last_page === current_page
             });
         }
 
+        // Next page (like "التالي »")
         metaLinks.push({ url: links.next, label: "التالي &raquo;", active: false });
 
         res.json({
@@ -88,6 +140,7 @@ router.get('/statement/:currency', authService.authenticate, async (req, res) =>
                 reference: txn.REFERENCE,
                 direction: txn.DIRECTION,
                 amount: txn.AMOUNT,
+                ac_ccy: txn.CURRENCY,
                 date: txn.TRN_DATE,
                 time: txn.TRN_TIME,
                 description: txn.DESCRIPTION

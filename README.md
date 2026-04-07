@@ -40,6 +40,61 @@ echo 'export LD_LIBRARY_PATH=/opt/oracle/instantclient_21_8:$LD_LIBRARY_PATH' >>
 source ~/.bashrc
 ```
 
+## 💱 CBL FX House Module Overview
+
+This project also includes a **CBL FX House module** that integrates with Oracle FlexCube to manage **foreign-currency (USD/EUR) and LYD** balances and statements for FX houses and banks. It mirrors the FCMS pagination and response formats so it can plug into existing CBL FX frontends.
+
+### Goals
+
+- **Centralize FX purchase workflows** for FX houses and banks.
+- **Automate checks** using Oracle and bank APIs (e.g. balances, sufficient funds).
+- **Improve security** by using JWT tokens and server-side rules (no raw DB access from frontend).
+- **Provide analytics-ready data** (per bank, per contract, per request).
+
+### Key FX Features
+
+- **Authentication & Tokens**
+  - JWT generation and revocation (`/api/auth/token`, `/api/auth/revoke`).
+  - Tokens stored in MongoDB with `customer_number`, `customer_name`, and expiry.
+
+- **Balance API**
+  - `GET /api/fx/balance`
+  - Flow: token → `customerNumber` → Oracle `CBL_INFO` + `STTM_ACCOUNT_BALANCE`.
+  - Returns all accounts for the customer with:
+    - `account_number` (`CUST_AC_NO`), `currency` (`CCY`), `balance`.
+  - Balance is always fetched by **account number**, never by pure customer number.
+
+- **Statement API**
+  - `GET /api/fx/statement/:currency`
+  - Flow:
+    - Token → `customerNumber`.
+    - Find matching account for that currency via `CBL_INFO` (`CUST_NO` → `CUST_AC_NO`, `CCY`).
+    - Use that `account_number` to read transactions from `SMS_TRAN_TABLE` via `AC_NO`.
+  - Amount rules:
+    - **LYD**: `AMOUNT = NVL(LCY_AMOUNT, FCY_AMOUNT)` and `AUTH_STAT = 'A'`.
+    - **FX (USD/EUR/...)**: `AMOUNT = FCY_AMOUNT` and `FCY_AMOUNT IS NOT NULL` (no `AUTH_STAT` filter).
+  - Each transaction in `data[]` has:
+    - `reference`, `direction`, `amount`, `ac_ccy`, `date`, `time`, `description`.
+    - `ac_ccy` is the true account currency from Oracle (`AC_CCY`), used later for business logic and analytics.
+
+- **Pagination (FCMS-style)**
+  - Top-level `links`: `first`, `last`, `prev`, `next`.
+  - `meta` includes:
+    - `current_page`, `from`, `last_page`, `per_page`, `to`, `total`, `path`.
+    - `meta.links` array:
+      - `"&laquo; السابق"` (previous).
+      - Pages `1..10`.
+      - `"..."` entry.
+      - Last 2 pages.
+      - `"التالي &raquo;"` (next).
+
+- **Mongo Integration (design direction)**
+  - Statement pages can be cached into Mongo (e.g. `FxStatementPage` collection) when fetched from Oracle, so:
+    - Backend/cron jobs hit Oracle and save pages.
+    - Frontend later reads from a cached endpoint (e.g. `/api/fx/statement-cache/:currency`) instead of talking to Oracle directly, similar to the existing CBL FX/tab-backend architecture.
+
+This module is the foundation for a wider FX House system (contracts, limits, purchase requests, analytics) that will be detailed in separate technical and business proposal documents.
+
 ## 📦 Installation
 
 1. **Clone or download the project**
