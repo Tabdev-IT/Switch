@@ -777,7 +777,7 @@ async function processTransactionCreditNotice(req, res, data) {
       
       const toNumber = resolvedMsisdn;
       if (!toNumber) {
-        console.log('📱 Skipping credit notice SMS: no customer MSISDN resolved (creditor IBAN → Oracle)');
+        console.log('📱 Skippping credit notice SMS: no customer MSISDN resolved (creditor IBAN → Oracle)');
         smsResult = {
           success: false,
           skipped: true,
