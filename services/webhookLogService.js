@@ -42,10 +42,11 @@ class WebhookLogService {
         
         // Add SMS details if available
         if (smsResult) {
-          logData.sms_sent = smsResult.success || false;
+          logData.sms_sent = !!smsResult.success;
           logData.sms_message = smsResult.message || null;
-          logData.sms_recipient = '0923686840';
-          logData.sms_status = smsResult.success ? 'sent' : 'failed';
+          logData.sms_recipient = smsResult.recipient || null;
+          if (smsResult.skipped) logData.sms_status = 'skipped';
+          else logData.sms_status = smsResult.success ? 'sent' : 'failed';
           logData.sms_error = smsResult.error || null;
         }
       } else if (webhook === 'transaction_credit_notice') {
@@ -79,10 +80,11 @@ class WebhookLogService {
         
         // SMS details (use actual result if provided)
         if (smsResult) {
-          logData.sms_sent = smsResult.success || false;
+          logData.sms_sent = !!smsResult.success;
           logData.sms_message = smsResult.message || null;
-          logData.sms_recipient = '0923686840';
-          logData.sms_status = smsResult.success ? 'sent' : 'failed';
+          logData.sms_recipient = smsResult.recipient || null;
+          if (smsResult.skipped) logData.sms_status = 'skipped';
+          else logData.sms_status = smsResult.success ? 'sent' : 'failed';
           logData.sms_error = smsResult.error || null;
         } else {
           logData.sms_sent = false;

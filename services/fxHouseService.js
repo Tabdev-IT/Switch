@@ -3,13 +3,43 @@ const log = require('../utils/logger');
 
 class FXHouseService {
     /**
-     * Get all account balances for a specific customer
+     * Get all balances for a customer.
+     * Flow: Bearer token → customer number → find his accounts (cbl_info by CUST_NO) →
+     * for each account, balance comes from STTM_ACCOUNT_BALANCE by CUST_AC_NO (same as tab-backend).
+     * Returns whatever accounts he has (e.g. USD, LYD).
      */
     async getAllBalances(customerNumber) {
         log(`🔍 FXHouseService.getAllBalances: Cust=${customerNumber}`);
         const accounts = await oracle.getAccountsByCustNo(customerNumber);
-        log(`📊 Accounts and balances found: ${JSON.stringify(accounts)}`);
+        // getAccountsByCustNo joins STTM_ACCOUNT_BALANCE on CUST_AC_NO, so balance is by account number
+        log(`📊 Accounts and balances (by CUST_AC_NO): ${JSON.stringify(accounts)}`);
         return accounts;
+    }
+
+    /**
+     * Get all account numbers for a customer (for ownership checks / accounts list).
+     */
+    async getAccountNumbersForCustomer(customerNumber) {
+        log(`🔍 FXHouseService.getAccountNumbersForCustomer: Cust=${customerNumber}`);
+        const accounts = await oracle.getAccountsByCustNo(customerNumber);
+        return (accounts || []).map(acc => acc.CUST_AC_NO);
+    }
+
+    /**
+     * Get balance for a single account (by CUST_AC_NO).
+     */
+    async getBalanceByAccountNumber(accountNumber) {
+        log(`🔍 FXHouseService.getBalanceByAccountNumber: Acc=${accountNumber}`);
+        const balanceInfo = await oracle.getFXBalance(accountNumber);
+        if (!balanceInfo) {
+            log(`⚠️  No balance found for account ${accountNumber}`);
+            return null;
+        }
+        return {
+            account_number: accountNumber,
+            currency: balanceInfo.CCY,
+            balance: balanceInfo.BALANCE
+        };
     }
 
     /**
@@ -50,10 +80,10 @@ class FXHouseService {
     }
 
     /**
-     * Get balance for a specific customer and currency
+     * Get balance for a specific customer and currency (uses customer's accounts list then balance by account)
      */
     async getBalance(customerNumber, currency) {
-        const accounts = await this.getAllBalances(customerNumber);
+        const accounts = await oracle.getAccountsByCustNo(customerNumber);
         const targetAccount = accounts.find(acc => acc.CCY === currency);
 
         if (!targetAccount) {
@@ -61,7 +91,8 @@ class FXHouseService {
             return null;
         }
 
-        return targetAccount;
+        const balanceInfo = await this.getBalanceByAccountNumber(targetAccount.CUST_AC_NO);
+        return balanceInfo ? { ...targetAccount, ...balanceInfo } : targetAccount;
     }
 
     /**
@@ -74,7 +105,31 @@ class FXHouseService {
 
         log(`🔍 FXHouseService.getStatement: Cust=${customerNumber}, Ccy=${currency}, Page=${page}`);
 
-        const result = await oracle.getFXStatement(customerNumber, currency, {
+        // 1) Find the correct account number for this customer and currency
+        const accounts = await oracle.getAccountsByCustNo(customerNumber);
+        const dbCurrency = (currency || '').toUpperCase();
+        const targetAccount = (accounts || []).find(acc => acc.CCY === dbCurrency);
+
+        if (!targetAccount) {
+            log(`⚠️ No ${dbCurrency} account found for customer ${customerNumber}`);
+            return {
+                data: [],
+                meta: {
+                    current_page: page,
+                    from: 1,
+                    last_page: 1,
+                    per_page: limit,
+                    to: 0,
+                    total: 0,
+                    range: `1-0 of 0`
+                }
+            };
+        }
+
+        const accountNumber = targetAccount.CUST_AC_NO;
+
+        // 2) Fetch statement by account number (AC_NO) and currency
+        const result = await oracle.getFXStatementByAccount(accountNumber, dbCurrency, {
             limit,
             offset,
             drcr,
@@ -85,15 +140,17 @@ class FXHouseService {
         const total = result.pagination.total;
         const lastPage = Math.ceil(total / limit) || 1;
         const currentPage = parseInt(page);
+        const from = offset + 1;
+        const to = offset + result.transactions.length;
 
         return {
             data: result.transactions,
             meta: {
                 current_page: currentPage,
-                from: offset + 1,
+                from,
                 last_page: lastPage,
                 per_page: limit,
-                to: offset + result.transactions.length,
+                to,
                 total: total
             }
         };

@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const BASE_URL = 'http://localhost:3000';
+const BASE_URL = 'http://localhost:3300';
 const API_ENDPOINT = `${BASE_URL}/api/inquired`;
 
 // Test cases
@@ -17,6 +17,24 @@ const testCases = [
           STAN: "543028",
           TXNAMT: "20000",
           TERMID: "888777",
+          SETLDATE: "19-03-2025"
+        }
+      }
+    },
+    expectedStatus: 200
+  },
+  {
+    name: 'Valid Alphanumeric TERMID',
+    data: {
+      HeaderSwitchModel: {
+        TargetSystemUserID: "SWITCHUSER"
+      },
+      LookUpData: {
+        Details: {
+          RRN: "456107036921",
+          STAN: "543028",
+          TXNAMT: "20000",
+          TERMID: "092C05S9",
           SETLDATE: "19-03-2025"
         }
       }
@@ -141,14 +159,14 @@ const testCases = [
 
 async function runTests() {
   console.log('🧪 Starting API Tests...\n');
-  
+
   let passedTests = 0;
   let totalTests = testCases.length;
-  
+
   for (let i = 0; i < testCases.length; i++) {
     const testCase = testCases[i];
     console.log(`📋 Test ${i + 1}: ${testCase.name}`);
-    
+
     try {
       const response = await axios.post(API_ENDPOINT, testCase.data, {
         headers: {
@@ -156,7 +174,7 @@ async function runTests() {
         },
         timeout: 10000
       });
-      
+
       if (response.status === testCase.expectedStatus) {
         if (testCase.expectedError) {
           const result = response.data.Result[0];
@@ -174,7 +192,7 @@ async function runTests() {
       } else {
         console.log(`❌ FAILED - Expected status ${testCase.expectedStatus}, got ${response.status}`);
       }
-      
+
     } catch (error) {
       if (error.response) {
         const response = error.response;
@@ -197,12 +215,12 @@ async function runTests() {
         console.log(`❌ FAILED - Network error: ${error.message}`);
       }
     }
-    
+
     console.log(''); // Empty line for readability
   }
-  
+
   console.log(`📊 Test Results: ${passedTests}/${totalTests} tests passed`);
-  
+
   if (passedTests === totalTests) {
     console.log('🎉 All tests passed!');
   } else {
@@ -225,7 +243,7 @@ async function healthCheck() {
 // Main execution
 async function main() {
   console.log('🔍 Checking if server is running...');
-  
+
   const isHealthy = await healthCheck();
   if (!isHealthy) {
     console.log('❌ Server is not running. Please start the server first:');
@@ -234,7 +252,7 @@ async function main() {
     console.log('   npm start');
     return;
   }
-  
+
   console.log('✅ Server is running. Starting tests...\n');
   await runTests();
 }

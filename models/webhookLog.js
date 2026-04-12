@@ -99,13 +99,12 @@ const webhookLogSchema = new mongoose.Schema({
   
   sms_recipient: {
     type: String,
-    required: false,
-    default: '0923686840'
+    required: false
   },
   
   sms_status: {
     type: String,
-    enum: ['pending', 'sent', 'failed'],
+    enum: ['pending', 'sent', 'failed', 'skipped'],
     default: 'pending'
   },
   

@@ -18,6 +18,9 @@ router.post('/token', async (req, res) => {
         const token = await authService.generateToken(customerNumber);
         res.json({ token });
     } catch (error) {
+        if (error.code === 'NO_ACCOUNTS') {
+            return res.status(403).json({ error: 'Forbidden', message: 'Customer has no accounts; cannot issue token' });
+        }
         res.status(500).json({ error: 'Internal Server Error', message: error.message });
     }
 });

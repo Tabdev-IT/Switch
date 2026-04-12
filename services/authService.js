@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const Token = require('../models/Token');
 const oracle = require('../utils/Oracle');
 const log = require('../utils/logger');
@@ -9,29 +10,36 @@ const API_KEY = process.env.API_KEY || 'your_fallback_api_key';
 
 class AuthService {
     /**
-     * Generate a new JWT and save it to MongoDB
+     * Generate a new JWT and save it to MongoDB.
+     * Denies token if the customer has no accounts (query finds no account).
      */
     async generateToken(customerNumber) {
         try {
-            // 1. Fetch customer name from Oracle
+            // 1. Check customer has at least one account – don't issue token otherwise
+            const accounts = await oracle.getAccountsByCustNo(customerNumber);
+            if (!accounts || accounts.length === 0) {
+                log(`🚫 Token denied: No accounts found for customer ${customerNumber}`);
+                const err = new Error('Customer has no accounts');
+                err.code = 'NO_ACCOUNTS';
+                throw err;
+            }
+
+            // 2. Fetch customer name from Oracle
             const customer = await oracle.getCustomerByNo(customerNumber);
             const customerName = customer ? customer.CUSTOMER_NAME1 : 'Unknown Customer';
 
-            // 2. Generate JWT
+            // 3. Generate JWT (No expiration)
             const token = jwt.sign(
                 { customerNumber, customerName },
-                JWT_SECRET,
-                { expiresIn: '24h' }
+                JWT_SECRET
             );
 
-            const decoded = jwt.decode(token);
-
-            // 3. Save to MongoDB
+            // 4. Save to MongoDB with a distant future date to prevent TTL deletion
             await Token.create({
                 customer_number: customerNumber,
                 customer_name: customerName,
                 token: token,
-                expires_at: new Date(decoded.exp * 1000)
+                expires_at: new Date('9999-12-31T23:59:59Z')
             });
 
             log(`✅ Token generated and saved for: ${customerName} (${customerNumber})`);

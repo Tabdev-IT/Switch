@@ -50,6 +50,29 @@ function extractCoreAccountFromIban(iban) {
 	return null;
 }
 
+/** LYD or USD (case-insensitive); unknown codes fall back to LYD only when no code given */
+function normalizeCurrency(code) {
+  if (code == null || String(code).trim() === '') return 'LYD';
+  const c = String(code).trim().toUpperCase();
+  if (c === 'LYD' || c === 'USD') return c;
+  return 'LYD';
+}
+
+/** Ly Pay / webhook amounts: minor units -> major (÷1000), up to 3 decimals */
+function formatMajorFromMinorUnits(minorStr) {
+  if (minorStr == null) return null;
+  const minor = Number(String(minorStr).replace(/[^\d.-]/g, ''));
+  if (!Number.isFinite(minor)) return String(minorStr);
+  const major = minor / 1000;
+  return major.toFixed(3).replace(/\.?0+$/, '');
+}
+
+function formatAmountLabelArabic(majorStr, currencyCode) {
+  const ccy = normalizeCurrency(currencyCode);
+  if (ccy === 'USD') return `المبلغ: ${majorStr} USD`;
+  return `المبلغ: ${majorStr} د.ل`;
+}
+
 // Middleware to verify Bearer token
 const authenticateBearerToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -207,11 +230,12 @@ const validateWebhookPayload = (req, res, next) => {
         });
       }
       
-      if (amount.currency !== 'LYD') {
+      const ccy = String(amount.currency).trim().toUpperCase();
+      if (ccy !== 'LYD' && ccy !== 'USD') {
         return res.status(400).json({
           success: false,
           error: 'Bad Request',
-          message: 'Only LYD currency is supported'
+          message: 'Only LYD or USD currency is supported'
         });
       }
     }
@@ -238,11 +262,12 @@ const validateWebhookPayload = (req, res, next) => {
       });
     }
     
-    if (amount.currency !== 'LYD') {
+    const ccy = String(amount.currency).trim().toUpperCase();
+    if (ccy !== 'LYD' && ccy !== 'USD') {
       return res.status(400).json({
         success: false,
         error: 'Bad Request',
-        message: 'Only LYD currency is supported'
+        message: 'Only LYD or USD currency is supported'
       });
     }
     
@@ -371,13 +396,17 @@ async function processTransactionStatusUpdate(req, res, data) {
   let recipientMsisdn = null;
   let creditorName = null;
   let bankName = null;
+  let lyPayRecord = null;
   try {
     if (status === 'completed' || status === 'declined' || status === 'failed') {
       const found = await LyPayService.findDebitedByPaymentReference(payment_reference);
+      lyPayRecord = found || null;
       if (found && (found.debtorAccount || found.debtor_account)) {
         const acc = found.debtorAccount || found.debtor_account;
-        debtorAccountNumber = acc.identification || acc.accountNumber || acc.account_number || null;
-        console.log('🏦 Debtor account found:', debtorAccountNumber);
+        const rawId = acc.identification || acc.accountNumber || acc.account_number || null;
+        // Ly Pay often returns IBAN in identification; Oracle lookup uses core account (last 15 digits)
+        debtorAccountNumber = extractCoreAccountFromIban(rawId) || rawId;
+        console.log('🏦 Debtor account found:', { rawId, debtorAccountNumber });
         
         // Get creditor details from the API response
         if (found.creditorInstitution) {
@@ -402,6 +431,8 @@ async function processTransactionStatusUpdate(req, res, data) {
           message: 'Payment reference not found'
         });
         return { responded: true };
+      } else if (found && !(found.debtorAccount || found.debtor_account)) {
+        console.log('⚠️ Ly Pay record found but debtor account missing; continuing without Oracle mobile lookup');
       }
     }
   } catch (lyErr) {
@@ -409,19 +440,77 @@ async function processTransactionStatusUpdate(req, res, data) {
     // Continue without debtor account
   }
 
+  const BANK_TAGLINE = 'مصرف التضامن نفتخر بي خدمتكم';
+
+  function formatLibyaDateForSms(isoLike) {
+    if (!isoLike) {
+      try {
+        return new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Africa/Tripoli',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        }).format(new Date());
+      } catch (_) {
+        return new Date().toISOString().split('T')[0];
+      }
+    }
+    const d = new Date(isoLike);
+    if (Number.isNaN(d.getTime())) return String(isoLike).slice(0, 10);
+    try {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Africa/Tripoli',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(d);
+    } catch (_) {
+      return d.toISOString().split('T')[0];
+    }
+  }
+
+  function pickTxDateForSms(record) {
+    return (
+      record?.transactionDateTime ||
+      record?.transaction_date_time ||
+      record?.valueDateTime ||
+      record?.value_date_time ||
+      null
+    );
+  }
+
+  function pickMinorAmountString(record, webhookAmount) {
+    const fromWebhook = webhookAmount?.amount;
+    if (fromWebhook != null && String(fromWebhook).trim() !== '') return String(fromWebhook);
+    const da = record?.debtorAmount || record?.debtor_amount;
+    if (da?.amount != null && String(da.amount).trim() !== '') return String(da.amount);
+    return null;
+  }
+
+  const txDate = formatLibyaDateForSms(pickTxDateForSms(lyPayRecord));
+  const minorAmountStr = pickMinorAmountString(lyPayRecord, amount);
+  const currencyCode = normalizeCurrency(
+    amount?.currency ||
+      lyPayRecord?.debtorAmount?.currency ||
+      lyPayRecord?.debtor_amount?.currency
+  );
+  const amountMajorStr = minorAmountStr ? formatMajorFromMinorUnits(minorAmountStr) : null;
+  const amountLabel =
+    amountMajorStr == null ? null : formatAmountLabelArabic(amountMajorStr, currencyCode);
+
   // Calculate amount divided by 1000 (if amount exists)
   let amountInThousands = 0;
-  if (amount && amount.amount) {
-    amountInThousands = Math.round(parseInt(amount.amount) / 1000);
+  if (minorAmountStr) {
+    amountInThousands = Math.round(parseInt(minorAmountStr, 10) / 1000);
     console.log('💰 Amount calculation:', {
-      original: amount.amount,
+      original: minorAmountStr,
       dividedBy1000: amountInThousands
     });
   } else {
     console.log('💰 No amount provided for this transaction');
   }
   
-  // Send SMS notification to your phone number
+  // Send SMS only to the customer's MSISDN (resolved from debtor account via Oracle)
   let smsResult = null;
   
   if (global.smsManager && (global.SMS_Libyana.isConnected() || global.SMS_Madar.isConnected())) {
@@ -429,52 +518,101 @@ async function processTransactionStatusUpdate(req, res, data) {
       let message = '';
       
       if (status === 'completed') {
-        if (amountInThousands > 0) {
-          message = `تمت عمليه تحويل لي بي الى مستفيد: ${creditorName || 'غير محدد'}\nالى مصرف: ${bankName || 'غير محدد'}`;
-        } else {
-          message = `تمت عمليه تحويل لي بي الى مستفيد: ${creditorName || 'غير محدد'}\nالى مصرف: ${bankName || 'غير محدد'}`;
-        }
+        const amtLine =
+          amountLabel ||
+          (amountInThousands > 0
+            ? formatAmountLabelArabic(String(amountInThousands), currencyCode)
+            : null);
+        message = [
+          'تمت عملية لي بي بنجاح.',
+          `التاريخ: ${txDate}`,
+          amtLine,
+          `المستفيد: ${creditorName || 'غير محدد'}`,
+          `المصرف المستفيد: ${bankName || 'غير محدد'}`,
+          BANK_TAGLINE
+        ].filter(Boolean).join('\n');
         console.log('✅ Sending SMS for completed transaction');
       } else if (status === 'declined') {
-        message = `ناسف لقد فشلت عمليه تحويل لي بي الى مستفيد: ${creditorName || 'غير محدد'}\nالى مصرف: ${bankName || 'غير محدد'}`;
+        const amtLine =
+          amountLabel ||
+          (amountInThousands > 0
+            ? formatAmountLabelArabic(String(amountInThousands), currencyCode)
+            : null);
+        message = [
+          'عذراً، تم رفض عملية لي بي.',
+          `التاريخ: ${txDate}`,
+          amtLine,
+          `المستفيد: ${creditorName || 'غير محدد'}`,
+          `المصرف المستفيد: ${bankName || 'غير محدد'}`,
+          BANK_TAGLINE
+        ].filter(Boolean).join('\n');
         console.log('❌ Sending SMS for declined transaction');
       } else if (status === 'failed' || status_code === '05') {
-        if (amountInThousands > 0) {
-          message = `ناسف لقد فشلت عمليه تحويل لي بي الى مستفيد: ${creditorName || 'غير محدد'}\nالى مصرف: ${bankName || 'غير محدد'}`;
-        } else {
-          message = `ناسف لقد فشلت عمليه تحويل لي بي الى مستفيد: ${creditorName || 'غير محدد'}\nالى مصرف: ${bankName || 'غير محدد'}`;
-        }
+        const amtLine =
+          amountLabel ||
+          (amountInThousands > 0
+            ? formatAmountLabelArabic(String(amountInThousands), currencyCode)
+            : null);
+        message = [
+          'عذراً، فشلت عملية لي بي.',
+          `التاريخ: ${txDate}`,
+          amtLine,
+          `المستفيد: ${creditorName || 'غير محدد'}`,
+          `المصرف المستفيد: ${bankName || 'غير محدد'}`,
+          BANK_TAGLINE
+        ].filter(Boolean).join('\n');
         console.log('❌ Sending SMS for failed transaction');
       } else {
         // For other statuses (pending, cancelled)
         if (amountInThousands > 0) {
-          message = `Transaction of amount ${amountInThousands} status: ${status}${debtorAccountNumber ? ` - Account: ${debtorAccountNumber}` : ''}`;
+          message = [
+            `حالة العملية: ${status}`,
+            `التاريخ: ${txDate}`,
+            formatAmountLabelArabic(String(amountInThousands), currencyCode),
+            debtorAccountNumber ? `الحساب: ${debtorAccountNumber}` : null,
+            BANK_TAGLINE
+          ].filter(Boolean).join('\n');
         } else {
-          message = `Transaction status: ${status}${debtorAccountNumber ? ` - Account: ${debtorAccountNumber}` : ''}`;
+          message = [
+            `حالة العملية: ${status}`,
+            `التاريخ: ${txDate}`,
+            debtorAccountNumber ? `الحساب: ${debtorAccountNumber}` : null,
+            BANK_TAGLINE
+          ].filter(Boolean).join('\n');
         }
         console.log(`⏳ Sending SMS for ${status} transaction`);
       }
       
-      // Choose recipient: resolved from Oracle if available, otherwise fallback to default
-      const toNumber = recipientMsisdn || '0923686840';
-      console.log('📱 SMS recipient:', { recipientMsisdn, toNumber, fallback: !recipientMsisdn });
-      // Send SMS
-      const result = await global.smsManager.Send({
-        to: "0923686840",
-        message: message,
-        isWelcomeMessage: false
-      });
-      
-      smsResult = {
-        success: result.success,
-        message: message,
-        error: result.error || null
-      };
-      
-      if (result.success) {
-        console.log('📱 SMS sent successfully:', { to: toNumber, message });
+      const toNumber = recipientMsisdn;
+      if (!toNumber) {
+        console.log('📱 Skipping SMS: no customer MSISDN resolved (debtor account → Oracle)');
+        smsResult = {
+          success: false,
+          skipped: true,
+          recipient: null,
+          message: null,
+          error: 'Customer mobile not resolved'
+        };
       } else {
-        console.error('❌ SMS failed to send:', result.error);
+        console.log('📱 SMS recipient (customer):', { toNumber });
+        const result = await global.smsManager.Send({
+          to: toNumber,
+          message: message,
+          isWelcomeMessage: false
+        });
+        
+        smsResult = {
+          success: result.success,
+          recipient: toNumber,
+          message: message,
+          error: result.error || null
+        };
+        
+        if (result.success) {
+          console.log('📱 SMS sent successfully:', { to: toNumber, message });
+        } else {
+          console.error('❌ SMS failed to send:', result.error);
+        }
       }
       
     } catch (smsError) {
@@ -610,44 +748,70 @@ async function processTransactionCreditNotice(req, res, data) {
   
   if (global.smsManager && (global.SMS_Libyana.isConnected() || global.SMS_Madar.isConnected())) {
     try {
-      // Format amount (divide by 1000 if needed)
-      let formattedAmount = amount?.amount || '0';
-      if (formattedAmount !== '0') {
-        const amountInThousands = Math.round(parseInt(formattedAmount) / 1000);
-        formattedAmount = amountInThousands.toString();
-      }
-      
-      // Get current date in YYYY-MM-DD format
-      const currentDate = new Date().toISOString().split('T')[0];
-      
+      // Format amount (minor units -> major); currency from payload (LYD or USD)
+      const minorStr = amount?.amount != null ? String(amount.amount) : '0';
+      const creditCurrency = normalizeCurrency(amount?.currency);
+      const majorStr =
+        minorStr === '0'
+          ? '0'
+          : formatMajorFromMinorUnits(minorStr) || '0';
+
+      const currentDate = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Africa/Tripoli',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(new Date());
+
+      const BANK_TAGLINE = 'مصرف التضامن نفتخر بي خدمتكم';
+
       // Create Arabic SMS message
-      const message = `تم على حسابك  \nإيداع بقيمة ${formattedAmount} LYD بتاريخ ${currentDate} \nالمرسل: ${debtor_account?.name || 'غير محدد'} \nالمصرف المرسل: ${debtor_bank?.name || 'غير محدد'} \nنفتخر بخدمتكم - مصرف التضامن`;
+      const message = [
+        'تم على حسابك إيداع بنجاح.',
+        formatAmountLabelArabic(majorStr, creditCurrency),
+        `التاريخ: ${currentDate}`,
+        `المرسل: ${debtor_account?.name || 'غير محدد'}`,
+        `المصرف المرسل: ${debtor_bank?.name || 'غير محدد'}`,
+        BANK_TAGLINE
+      ].join('\n');
       
-      const toNumber = resolvedMsisdn || '0923686840';
-      console.log('📱 Sending credit notice SMS:', {
-        to: toNumber,
-        message: message,
-        amount: amount?.amount,
-        formattedAmount: formattedAmount
-      });
-      
-      // Send SMS
-      const result = await global.smsManager.Send({
-        to: "0923686840",
-        message: message,
-        isWelcomeMessage: false
-      });
-      
-      smsResult = {
-        success: result.success,
-        message: message,
-        error: result.error || null
-      };
-      
-      if (result.success) {
-        console.log('📱 Credit notice SMS sent successfully:', { to: toNumber });
+      const toNumber = resolvedMsisdn;
+      if (!toNumber) {
+        console.log('📱 Skipping credit notice SMS: no customer MSISDN resolved (creditor IBAN → Oracle)');
+        smsResult = {
+          success: false,
+          skipped: true,
+          recipient: null,
+          message: null,
+          error: 'Customer mobile not resolved'
+        };
       } else {
-        console.error('❌ Credit notice SMS failed to send:', result.error);
+        console.log('📱 Sending credit notice SMS (customer):', {
+          to: toNumber,
+          message: message,
+          amount: amount?.amount,
+          currency: creditCurrency,
+          formattedAmount: majorStr
+        });
+        
+        const result = await global.smsManager.Send({
+          to: toNumber,
+          message: message,
+          isWelcomeMessage: false
+        });
+        
+        smsResult = {
+          success: result.success,
+          recipient: toNumber,
+          message: message,
+          error: result.error || null
+        };
+        
+        if (result.success) {
+          console.log('📱 Credit notice SMS sent successfully:', { to: toNumber });
+        } else {
+          console.error('❌ Credit notice SMS failed to send:', result.error);
+        }
       }
       
     } catch (smsError) {

@@ -10,7 +10,7 @@ const transactionService = require('../services/transactionService');
 router.post('/inquired', async (req, res) => {
   try {
     console.log('📥 Received inquired request:', JSON.stringify(req.body, null, 2));
-    
+
     // Validate request body
     const validation = validateRequestBody(req.body);
     if (!validation.isValid) {
@@ -22,10 +22,10 @@ router.post('/inquired', async (req, res) => {
         }]
       });
     }
-    
+
     // Extract transaction data from request
     const transactionData = req.body.LookUpData.Details;
-    
+
     console.log('🔍 Looking up transaction with data:', {
       RRN: transactionData.RRN,
       STAN: transactionData.STAN,
@@ -33,28 +33,28 @@ router.post('/inquired', async (req, res) => {
       TERMID: transactionData.TERMID,
       SETLDATE: transactionData.SETLDATE,
       'Original Date': transactionData.SETLDATE,
-      'Converted Date': transactionData.SETLDATE ? 
+      'Converted Date': transactionData.SETLDATE ?
         (() => {
           const [day, month, year] = transactionData.SETLDATE.split('-');
           const yearShort = year.slice(-2);
           return `${yearShort}${month.padStart(2, '0')}${day.padStart(2, '0')}`;
         })() : 'N/A'
     });
-    
+
     // Query database for transaction
     const queryResult = await transactionService.lookupTransaction(transactionData);
-    
-    // Process result and format response
-    const response = transactionService.processTransactionResult(queryResult);
-    
+
+    // Process result and format response (async – also checks SMS_TRAN_TABLE for reversal)
+    const response = await transactionService.processTransactionResult(queryResult);
+
     console.log('📤 Sending response:', JSON.stringify(response, null, 2));
-    
+
     // Send response
     res.status(200).json(response);
-    
+
   } catch (error) {
     console.error('❌ Unexpected error in inquired endpoint:', error);
-    
+
     // Send generic error response
     res.status(500).json({
       Result: [{

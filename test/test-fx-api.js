@@ -2,7 +2,8 @@ const authService = require('../services/authService');
 const { initializeOracle, closePool } = require('../config/database');
 const { connectMongoDB, disconnectMongoDB } = require('../config/mongodb');
 const Token = require('../models/Token');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
 async function runTest() {
     console.log('🧪 Starting FX House API Test Setup...');
@@ -13,10 +14,10 @@ async function runTest() {
         await connectMongoDB();
         await initializeOracle();
 
-        const customerNumber = '000034024';
+        const customerNumber = '000059975';
         console.log(`🔍 Generating token for Customer: ${customerNumber}`);
 
-        // 2. Generate and save token (this calls Oracle for name and Mongo for saving)
+        // 2. Generate and save token (denied if customer has no accounts)
         const token = await authService.generateToken(customerNumber);
 
         // 3. Verify it's in MongoDB
@@ -34,7 +35,12 @@ async function runTest() {
         console.log('with this Bearer token in the header.');
 
     } catch (error) {
-        console.error('❌ Error during test setup:', error.stack);
+        if (error.code === 'NO_ACCOUNTS') {
+            console.error('❌ Token denied: No accounts found for this customer. Cannot issue Bearer token.');
+            console.error(`   Customer: ${error.message}`);
+        } else {
+            console.error('❌ Error during test setup:', error.stack);
+        }
     } finally {
         await closePool();
         await disconnectMongoDB();

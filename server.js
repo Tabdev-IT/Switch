@@ -1,38 +1,40 @@
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const helmet = require('helmet');
 const { initializeOracle, closePool } = require('./config/database');
-// const { connectMongoDB, disconnectMongoDB } = require('./config/mongodb');
+const { connectMongoDB, disconnectMongoDB } = require('./config/mongodb');
 
 // Import routes
 const inquiredRoutes = require('./routes/inquired');
-// const smsRoutes = require('./routes/sms');
-// const webhookRoutes = require('./routes/webhook');
-// const fxHouseRoutes = require('./routes/fxHouse');
+const smsRoutes = require('./routes/sms');
+const webhookRoutes = require('./routes/webhook');
+const fxHouseRoutes = require('./routes/fxHouse');
 const authRoutes = require('./routes/auth');
+const otpRoutes = require('./routes/otp');
 const oracle = require('./utils/Oracle');
 
 // Import SMPP services
-// const { Sms, SMSManager } = require('./services/smppService');
-// const smppConfig = require('./config/smpp');
+const { Sms, SMSManager } = require('./services/smppService');
+const smppConfig = require('./config/smpp');
 
 // Initialize SMPP services immediately
-// console.log('📱 Initializing SMPP services...');
-// const SMS_Libyana = new Sms('Libyana', smppConfig.smpp.libyana);
-// const SMS_Madar = new Sms('Almadar', smppConfig.smpp.almadar);
-// const smsManager = new SMSManager(SMS_Libyana, SMS_Madar);
+console.log('📱 Initializing SMPP services...');
+const SMS_Libyana = new Sms('Libyana', smppConfig.smpp.libyana);
+const SMS_Madar = new Sms('Almadar', smppConfig.smpp.almadar);
+const smsManager = new SMSManager(SMS_Libyana, SMS_Madar);
 
 // Make SMPP services available globally
-// global.SMS_Libyana = SMS_Libyana;
-// global.SMS_Madar = SMS_Madar;
-// global.smsManager = smsManager;
+global.SMS_Libyana = SMS_Libyana;
+global.SMS_Madar = SMS_Madar;
+global.smsManager = smsManager;
 
-// console.log('📱 SMPP services initialized successfully');
+console.log('📱 SMPP services initialized successfully');
 
 // Create Express app
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3300;
 
 // Security middleware
 app.use(helmet());
@@ -61,7 +63,7 @@ app.get('/health', (req, res) => {
 });
 
 // Webhook routes - NO body parsing, raw body needed for HMAC
-// app.use('/webhooks', webhookRoutes);
+app.use('/webhooks', webhookRoutes);
 
 // Body parsing middleware (MUST be before routes that use req.body)
 app.use(bodyParser.json({ limit: '10mb' }));
@@ -69,9 +71,10 @@ app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
 // API routes
 app.use('/api', inquiredRoutes);
-// app.use('/api/sms', smsRoutes);
-// app.use('/api/fx', fxHouseRoutes);
+app.use('/api/sms', smsRoutes);
+app.use('/api/fx', fxHouseRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/otp', otpRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -97,14 +100,14 @@ app.use((error, req, res, next) => {
 process.on('SIGTERM', async () => {
   console.log('🛑 SIGTERM received, shutting down gracefully...');
   await closePool();
-  // await disconnectMongoDB();
+  await disconnectMongoDB();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   console.log('🛑 SIGINT received, shutting down gracefully...');
   await closePool();
-  // await disconnectMongoDB();
+  await disconnectMongoDB();
   process.exit(0);
 });
 
@@ -123,9 +126,9 @@ async function startServer() {
     console.log('✅ Legacy Oracle connection initialized');
 
     // Initialize MongoDB connection
-    // console.log('⏳ Connecting to MongoDB...');
-    // await connectMongoDB();
-    // console.log('✅ MongoDB connected');
+    console.log('⏳ Connecting to MongoDB...');
+    await connectMongoDB();
+    console.log('✅ MongoDB connected');
 
     // Start Express server
     app.listen(PORT, '0.0.0.0', () => {
@@ -136,17 +139,17 @@ async function startServer() {
       console.log('⏰', new Date().toISOString());
 
       // Log SMPP connection status after server starts
-      // setTimeout(() => {
-      //   console.log('\n📱 SMPP Connection Status:');
-      //   console.log(`   Libyana: ${global.SMS_Libyana.isConnected() ? '✅ Connected' : '❌ Disconnected'}`);
-      //   console.log(`   Almadar: ${global.SMS_Madar.isConnected() ? '✅ Connected' : '❌ Disconnected'}`);
-      //   
-      //   if (global.SMS_Libyana.isConnected() || global.SMS_Madar.isConnected()) {
-      //     console.log('🎉 SMPP services are ready for SMS operations!');
-      //   } else {
-      //     console.log('⚠️  SMPP services are not connected. Check your network and SMPP provider settings.');
-      //   }
-      // }, 3000); // Wait 3 seconds for connections to establish
+      setTimeout(() => {
+        console.log('\n📱 SMPP Connection Status:');
+        console.log(`   Libyana: ${global.SMS_Libyana.isConnected() ? '✅ Connected' : '❌ Disconnected'}`);
+        console.log(`   Almadar: ${global.SMS_Madar.isConnected() ? '✅ Connected' : '❌ Disconnected'}`);
+
+        if (global.SMS_Libyana.isConnected() || global.SMS_Madar.isConnected()) {
+          console.log('🎉 SMPP services are ready for SMS operations!');
+        } else {
+          console.log('⚠️  SMPP services are not connected. Check your network and SMPP provider settings.');
+        }
+      }, 3000); // Wait 3 seconds for connections to establish
     });
 
   } catch (error) {

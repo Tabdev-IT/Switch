@@ -53,11 +53,11 @@ function validateTXNAMT(txnamt) {
 // Validate TERMID (6-8 digits, no special characters)
 function validateTERMID(termid) {
   if (!termid || typeof termid !== 'string') {
-    return { isValid: false, error: 'E5', message: 'Please check termid must be not less than 6 and not more then 8 digit and not include any special characters' };
+    return { isValid: false, error: 'E5', message: 'Please check termid must be between 6 and 8 characters and not include any special characters' };
   }
 
-  if (!/^\d{6,8}$/.test(termid)) {
-    return { isValid: false, error: 'E5', message: 'Please check termid must be not less than 6 and not more then 8 digit and not include any special characters' };
+  if (!/^[a-zA-Z0-9]{6,8}$/.test(termid)) {
+    return { isValid: false, error: 'E5', message: 'Please check termid must be between 6 and 8 characters and not include any special characters' };
   }
 
   return { isValid: true };
