@@ -28,7 +28,7 @@ class AuthService {
             const customer = await oracle.getCustomerByNo(customerNumber);
             const customerName = customer ? customer.CUSTOMER_NAME1 : 'Unknown Customer';
 
-            // 3. Generate JWT (No expiration)
+            // 3. Generate JWT (no exp claim; validated via MongoDB)
             const token = jwt.sign(
                 { customerNumber, customerName },
                 JWT_SECRET
