@@ -73,32 +73,7 @@ function formatAmountLabelArabic(majorStr, currencyCode) {
   return `المبلغ: ${majorStr} د.ل`;
 }
 
-// Middleware to verify Bearer token
-const authenticateBearerToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      success: false,
-      error: 'Unauthorized',
-      message: 'Bearer token is required'
-    });
-  }
-  
-  const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-  
-  if (token !== webhookConfig.bearerToken) {
-    return res.status(403).json({
-      success: false,
-      error: 'Forbidden',
-      message: 'Invalid Bearer token'
-    });
-  }
-  
-  next();
-};
-
-// Middleware to verify HMAC signature
+// Middleware to verify HMAC signature (same as PHP: hash_hmac('sha256', $payloadJson, $secret) → hex)
 const verifyHMACSignature = (req, res, next) => {
   const signature = req.headers.signature;
   
@@ -123,9 +98,9 @@ const verifyHMACSignature = (req, res, next) => {
     
     const rawBody = req.body.toString();
     
-    // Create HMAC hash from raw request body
+    // Must match the exact bytes the sender signed (equivalent to PHP json_encode($payload) when body is that string)
     const hmac = crypto.createHmac('sha256', webhookConfig.hmacSecret);
-    const expectedSignature = hmac.update(rawBody).digest('hex');
+    const expectedSignature = hmac.update(rawBody, 'utf8').digest('hex');
     
     console.log('🔐 HMAC Verification:', {
       receivedSignature: signature,
@@ -298,7 +273,6 @@ const validateWebhookPayload = (req, res, next) => {
  * Receive webhook notifications from bank/FI system
  */
 router.post('/', 
-  authenticateBearerToken,
   rawBodyParser, // Apply raw body parser
   verifyHMACSignature,
   validateWebhookPayload,
@@ -379,9 +353,20 @@ async function processTransactionStatusUpdate(req, res, data) {
         currentStatus: status
       });
       
-      // Return early - don't process duplicate payment references
       console.log('⏭️ Skipping duplicate payment reference processing');
-      return;
+      res.status(200).json({
+        success: true,
+        message: 'This payment reference was already processed; duplicate notification ignored.',
+        data: {
+          payment_reference,
+          status: 'already_processed',
+          reason: 'duplicate_payment_reference',
+          webhook_type: existingLog.webhook_type,
+          previous_status: existingLog.status,
+          previous_processing: existingLog.createdAt
+        }
+      });
+      return { responded: true };
     }
     
     console.log('✅ New payment reference, proceeding with processing...');
@@ -687,15 +672,16 @@ async function processTransactionCreditNotice(req, res, data) {
         currentStatus: 'credit_notice'
       });
       
-      // Return proper response for duplicate payment reference
       console.log('⏭️ Skipping duplicate payment reference processing');
       res.status(200).json({
         success: true,
-        message: 'Payment reference already processed',
+        message: 'This payment reference was already processed; duplicate notification ignored.',
         data: {
           payment_reference,
-          status: 'skipped',
+          status: 'already_processed',
           reason: 'duplicate_payment_reference',
+          webhook_type: existingLog.webhook_type,
+          previous_status: existingLog.status,
           previous_processing: existingLog.createdAt
         }
       });

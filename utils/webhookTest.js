@@ -2,15 +2,22 @@ const crypto = require('crypto');
 const webhookConfig = require('../config/webhook');
 
 /**
- * Generate HMAC signature for webhook payload
+ * Canonical JSON string and HMAC-SHA256 hex (same as PHP hash_hmac('sha256', $payloadJson, $secret)).
+ * The HTTP body must be exactly `body` — signing any other serialization will fail verification.
+ */
+function jsonBodyAndHmacHex(payload) {
+  const body = JSON.stringify(payload);
+  const signature = crypto.createHmac('sha256', webhookConfig.hmacSecret).update(body, 'utf8').digest('hex');
+  return { body, signature };
+}
+
+/**
  * @param {Object} payload - Webhook payload
- * @returns {string} - HMAC signature
+ * @returns {string} - HMAC hex signature
  */
 function generateHMACSignature(payload) {
-  const hmac = crypto.createHmac('sha256', webhookConfig.hmacSecret);
-  const body = JSON.stringify(payload);
+  const { body, signature } = jsonBodyAndHmacHex(payload);
   console.log('🔐 Generating HMAC for body:', body);
-  const signature = hmac.update(body).digest('hex');
   console.log('🔐 Generated signature:', signature);
   return signature;
 }
@@ -88,14 +95,12 @@ function generateCreditNoticePayload(paymentReference = 'REF12345-6789-IRKAS-482
  * @returns {string} - cURL command
  */
 function generateCurlCommand(payload, baseUrl = 'http://localhost:3000') {
-  const signature = generateHMACSignature(payload);
-  const bearerToken = webhookConfig.bearerToken;
-  
+  const { body, signature } = jsonBodyAndHmacHex(payload);
+  const shellBody = body.replace(/'/g, `'\\''`);
   return `curl --location '${baseUrl}/webhooks' \\
 --header 'Content-Type: application/json' \\
---header 'Authorization: Bearer ${bearerToken}' \\
 --header 'Signature: ${signature}' \\
---data '${JSON.stringify(payload, null, 2)}'`;
+--data-raw '${shellBody}'`;
 }
 
 /**
@@ -171,7 +176,6 @@ function testWebhookScenarios() {
 function generateEnvVars() {
   console.log('🔧 Environment Variables for Webhook Configuration\n');
   console.log('# Webhook Configuration');
-  console.log(`WEBHOOK_BEARER_TOKEN=${webhookConfig.bearerToken}`);
   console.log(`WEBHOOK_HMAC_SECRET=${webhookConfig.hmacSecret}`);
   console.log('\n# Add this to your .env file or server environment');
 }
@@ -180,6 +184,7 @@ function generateEnvVars() {
 module.exports = {
   generateTestPayload,
   generateCurlCommand,
+  jsonBodyAndHmacHex,
   testWebhookScenarios,
   generateEnvVars,
   showSMSExamples
@@ -189,7 +194,6 @@ module.exports = {
 if (require.main === module) {
   console.log('🚀 Webhook Testing Utility\n');
   console.log('Current Configuration:');
-  console.log(`Bearer Token: ${webhookConfig.bearerToken}`);
   console.log(`HMAC Secret: ${webhookConfig.hmacSecret}`);
   console.log(`Endpoint: ${webhookConfig.endpoint}\n`);
   
