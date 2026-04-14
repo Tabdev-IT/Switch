@@ -34,7 +34,7 @@ console.log('📱 SMPP services initialized successfully');
 
 // Create Express app
 const app = express();
-const PORT = process.env.PORT || 3300;
+const PORT = process.env.PORT || 3000;
 
 // Security middleware
 app.use(helmet());

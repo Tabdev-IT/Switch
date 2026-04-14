@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const BASE_URL = 'http://localhost:3300';
+const BASE_URL = 'http://localhost:3000';
 const API_ENDPOINT = `${BASE_URL}/api/inquired`;
 
 // Test cases

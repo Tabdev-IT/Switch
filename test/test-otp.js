@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const BASE_URL = 'http://localhost:3300/api/otp'; // Adjust port if your server runs on a different port
+const BASE_URL = 'http://localhost:3000/api/otp'; // Adjust port if your server runs on a different port
 const TEST_PHONENUMBER = '218923686840';
 
 async function runTests() {
