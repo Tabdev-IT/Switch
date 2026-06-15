@@ -15,7 +15,7 @@ const webhookLogSchema = new mongoose.Schema({
   webhook_type: {
     type: String,
     required: true,
-    enum: ['transaction_status_update', 'transaction_credit_notice']
+    enum: ['transaction_status_update', 'transaction_credit_notice', 'client_message']
   },
   
   // Transaction details
@@ -31,7 +31,7 @@ const webhookLogSchema = new mongoose.Schema({
     required: function() {
       return this.webhook_type === 'transaction_status_update';
     },
-    enum: ['completed', 'declined', 'failed', 'pending', 'cancelled', 'credit_notice']
+    enum: ['completed', 'declined', 'failed', 'pending', 'cancelled', 'credit_notice', 'client_message']
   },
   
   status_code: {

@@ -89,6 +89,35 @@ function generateCreditNoticePayload(paymentReference = 'REF12345-6789-IRKAS-482
 }
 
 /**
+ * Generate test payload for client_message API gateway (raw token auth, no HMAC)
+ * @param {string} phone - Phone in any Libyan format (+21893…, 093…, 93…)
+ * @param {string} message - SMS body
+ */
+function generateClientMessagePayload(
+  phone = '+218936868840',
+  message = 'Your OTP is 123456',
+  ext_ref_no = 'REF123456789'
+) {
+  return {
+    phone,
+    message,
+    ext_ref_no
+  };
+}
+
+/**
+ * Generate cURL for client_message gateway (raw token in Authorization header)
+ */
+function generateClientMessageCurl(payload, baseUrl = 'http://localhost:3000', authToken = webhookConfig.clientMessageBearerToken) {
+  const body = JSON.stringify(payload);
+  const shellBody = body.replace(/'/g, `'\\''`);
+  return `curl --location '${baseUrl}/webhooks/client-message' \\
+--header 'Content-Type: application/json' \\
+--header 'Authorization: ${authToken}' \\
+--data-raw '${shellBody}'`;
+}
+
+/**
  * Generate cURL command for testing webhook
  * @param {Object} payload - Webhook payload
  * @param {string} baseUrl - Base URL for the webhook endpoint
@@ -168,6 +197,12 @@ function testWebhookScenarios() {
   console.log('Payload:', JSON.stringify(creditNoticePayload, null, 2));
   console.log('cURL:', generateCurlCommand(creditNoticePayload));
   console.log('---\n');
+
+  const clientMessagePayload = generateClientMessagePayload();
+  console.log('📱 Test 6: Client Message Gateway (raw token auth, SMS by phone)');
+  console.log('Payload:', JSON.stringify(clientMessagePayload, null, 2));
+  console.log('cURL:', generateClientMessageCurl(clientMessagePayload));
+  console.log('---\n');
 }
 
 /**
@@ -177,12 +212,16 @@ function generateEnvVars() {
   console.log('🔧 Environment Variables for Webhook Configuration\n');
   console.log('# Webhook Configuration');
   console.log(`WEBHOOK_HMAC_SECRET=${webhookConfig.hmacSecret}`);
+  console.log(`CLIENT_MESSAGE_BEARER_TOKEN=${webhookConfig.clientMessageBearerToken}`);
   console.log('\n# Add this to your .env file or server environment');
 }
 
 // Export functions for use in other files
 module.exports = {
   generateTestPayload,
+  generateCreditNoticePayload,
+  generateClientMessagePayload,
+  generateClientMessageCurl,
   generateCurlCommand,
   jsonBodyAndHmacHex,
   testWebhookScenarios,

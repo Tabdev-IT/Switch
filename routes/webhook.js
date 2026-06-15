@@ -5,9 +5,11 @@ const webhookConfig = require('../config/webhook');
 const WebhookLogService = require('../services/webhookLogService');
 const LyPayService = require('../services/lyPayService');
 const { getConnection, closeConnection } = require('../config/database');
+const { FormatContactNumber, formatPhoneForSmpp, extractPhoneFromPayload } = require('../utils/phone');
 
-// Raw body parser specifically for this route
+// Raw body parser specifically for HMAC webhooks
 const rawBodyParser = express.raw({ type: 'application/json', limit: '10mb' });
+const jsonBodyParser = express.json({ limit: '10mb' });
 
 // Helper: fetch mobile number by core account number from Oracle
 async function fetchMobileNumberByAccount(accountNumber) {
@@ -29,15 +31,17 @@ async function fetchMobileNumberByAccount(accountNumber) {
   }
 }
 
-// Helper: normalize MSISDN per rules
+// Helper: normalize MSISDN from Oracle / bank records (uses tab-backend phone helper)
 function normalizeMsisdn(msisdnRaw) {
-	if (!msisdnRaw) return null;
-	const digits = String(msisdnRaw).replace(/\D/g, '');
-	if (digits.startsWith('218')) return digits; // keep country code as-is
-	if (digits.startsWith('0')) return digits; // already local format
-	if (digits.startsWith('9')) return `0${digits}`; // add leading zero for 9/92...
-	if (digits.length === 9) return `0${digits}`; // generic 9-digit local
-	return digits; // fallback
+  if (!msisdnRaw) return null;
+  const local = FormatContactNumber(msisdnRaw);
+  if (local) return local;
+  const digits = String(msisdnRaw).replace(/\D/g, '');
+  if (digits.startsWith('218')) return digits;
+  if (digits.startsWith('0')) return digits;
+  if (digits.startsWith('9')) return `0${digits}`;
+  if (digits.length === 9) return `0${digits}`;
+  return digits;
 }
 
 // Helper: extract core account (last 15 digits) from IBAN
@@ -143,6 +147,93 @@ const verifyHMACSignature = (req, res, next) => {
   }
 };
 
+// Token auth for client_message gateway (Authorization = raw token; optional "Bearer " prefix accepted)
+function extractAuthToken(authHeader) {
+  if (!authHeader) return '';
+  const value = String(authHeader).trim();
+  if (/^bearer\s+/i.test(value)) {
+    return value.replace(/^bearer\s+/i, '').trim();
+  }
+  return value;
+}
+
+const verifyBearerToken = (req, res, next) => {
+  const token = extractAuthToken(req.headers.authorization);
+  const expected = (
+    process.env.CLIENT_MESSAGE_BEARER_TOKEN ||
+    process.env.WEBHOOK_BEARER_TOKEN ||
+    webhookConfig.clientMessageBearerToken ||
+    ''
+  ).trim();
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized',
+      message: 'Authorization token is required'
+    });
+  }
+
+  if (!expected) {
+    return res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      message: 'Client message auth token is not configured'
+    });
+  }
+
+  const tokenBuf = Buffer.from(token);
+  const expectedBuf = Buffer.from(expected);
+
+  if (tokenBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(tokenBuf, expectedBuf)) {
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized',
+      message: 'Invalid authorization token'
+    });
+  }
+
+  next();
+};
+
+const validateClientMessagePayload = (req, res, next) => {
+  const phone = extractPhoneFromPayload(req.body);
+  const { message, ext_ref_no } = req.body || {};
+
+  if (!phone) {
+    return res.status(400).json({
+      success: false,
+      error: 'Bad Request',
+      message: 'Missing required field: phone (or phoneNumber, mobile, msisdn)'
+    });
+  }
+
+  if (!formatPhoneForSmpp(phone)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Bad Request',
+      message: 'Invalid Libyan mobile number. Accepted formats: +21893…, 093…, 93…'
+    });
+  }
+
+  if (!message || !String(message).trim()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Bad Request',
+      message: 'Missing required field: message'
+    });
+  }
+
+  if (!ext_ref_no || !String(ext_ref_no).trim()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Bad Request',
+      message: 'Missing required field: ext_ref_no'
+    });
+  }
+
+  next();
+};
 
 // Middleware to validate webhook payload
 const validateWebhookPayload = (req, res, next) => {
@@ -264,7 +355,7 @@ const validateWebhookPayload = (req, res, next) => {
       });
     }
   }
-  
+
   next();
 };
 
@@ -311,7 +402,7 @@ router.post('/',
             }
           }
           break;
-          
+
         default:
           console.log('⚠️ Unknown webhook type:', webhook);
       }
@@ -322,6 +413,30 @@ router.post('/',
     } catch (error) {
       console.error('❌ Webhook processing error:', error);
       res.status(500).end();
+    }
+  }
+);
+
+/**
+ * POST /webhooks/client-message
+ * API gateway: send SMS to customer by phone (Authorization header = raw token)
+ */
+router.post('/client-message',
+  jsonBodyParser,
+  verifyBearerToken,
+  validateClientMessagePayload,
+  async (req, res) => {
+    try {
+      await processClientMessage(req, res, req.body);
+    } catch (error) {
+      console.error('❌ Client message gateway error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          error: 'Internal Server Error',
+          message: error.message
+        });
+      }
     }
   }
 );
@@ -847,6 +962,116 @@ async function processTransactionCreditNotice(req, res, data) {
 }
 
 /**
+ * Send SMS to a customer by phone (client_message API gateway).
+ * Phone accepts +21893…, 093…, 93… (normalized via tab-backend FormatPhone helper).
+ */
+async function processClientMessage(req, res, data) {
+  const phoneRaw = extractPhoneFromPayload(data);
+  const { message, ext_ref_no } = data;
+  const extRefNo = String(ext_ref_no).trim();
+  const toNumber = formatPhoneForSmpp(phoneRaw);
+  const smsText = String(message).trim();
+
+  console.log('📱 Client message webhook:', {
+    ext_ref_no: extRefNo,
+    phoneRaw,
+    normalized: toNumber,
+    messageLength: smsText.length
+  });
+
+  let smsResult = null;
+
+  if (!global.smsManager || (!global.SMS_Libyana.isConnected() && !global.SMS_Madar.isConnected())) {
+    smsResult = {
+      success: false,
+      recipient: toNumber,
+      message: smsText,
+      ext_ref_no: extRefNo,
+      error: 'SMS service not available'
+    };
+    res.status(503).json({
+      success: false,
+      error: 'Service Unavailable',
+      message: 'SMS service not connected',
+      data: { ext_ref_no: extRefNo, recipient: toNumber }
+    });
+    return { responded: true };
+  }
+
+  try {
+    const result = await global.smsManager.Send({
+      to: toNumber,
+      message: smsText,
+      isWelcomeMessage: false
+    });
+
+    smsResult = {
+      success: result.success,
+      recipient: toNumber,
+      message: smsText,
+      ext_ref_no: extRefNo,
+      error: result.error || null
+    };
+
+    if (result.success) {
+      console.log('📱 Client message SMS sent:', { ext_ref_no: extRefNo, to: toNumber });
+      res.status(200).json({
+        success: true,
+        message: 'SMS sent successfully',
+        data: {
+          ext_ref_no: extRefNo,
+          recipient: toNumber,
+          phoneInput: phoneRaw
+        }
+      });
+    } else {
+      console.error('❌ Client message SMS failed:', result.error);
+      res.status(400).json({
+        success: false,
+        error: 'SMS Failed',
+        message: result.error || 'Failed to send SMS',
+        data: { ext_ref_no: extRefNo, recipient: toNumber }
+      });
+    }
+  } catch (smsError) {
+    console.error('❌ Client message SMS error:', smsError);
+    smsResult = {
+      success: false,
+      recipient: toNumber,
+      message: smsText,
+      ext_ref_no: extRefNo,
+      error: smsError.message
+    };
+    res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      message: smsError.message,
+      data: { ext_ref_no: extRefNo }
+    });
+  }
+
+  try {
+    await WebhookLogService.logWebhookTransaction(
+      {
+        webhook: 'client_message',
+        data: {
+          phone: phoneRaw,
+          message: smsText,
+          ext_ref_no: extRefNo,
+          payment_reference: extRefNo
+        }
+      },
+      smsResult,
+      { ip: req.ip, transactionId: extRefNo }
+    );
+  } catch (dbError) {
+    console.error('❌ Failed to log client_message webhook:', dbError.message);
+  }
+
+  return { responded: true };
+}
+
+/**
  * GET /webhooks/status
  * Get webhook service status
  */
@@ -856,7 +1081,9 @@ router.get('/status', (req, res) => {
     message: 'Webhook service is running',
     timestamp: new Date().toISOString(),
     supportedWebhooks: webhookConfig.allowedWebhooks,
-    endpoint: webhookConfig.endpoint
+    endpoint: webhookConfig.endpoint,
+    clientMessageEndpoint: webhookConfig.clientMessageEndpoint,
+    clientMessageAuth: 'Authorization header (raw token)'
   });
 });
 

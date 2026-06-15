@@ -90,6 +90,20 @@ class WebhookLogService {
           logData.sms_sent = false;
           logData.sms_status = 'pending';
         }
+      } else if (webhook === 'client_message') {
+        const { phone, message, ext_ref_no } = data;
+        logData.status = 'client_message';
+        logData.payment_reference = data.payment_reference || ext_ref_no || requestInfo.transactionId || `client_msg_${Date.now()}`;
+        logData.transaction_id = ext_ref_no || requestInfo.transactionId || null;
+        logData.notes = phone ? `Phone input: ${phone}` : null;
+
+        if (smsResult) {
+          logData.sms_sent = !!smsResult.success;
+          logData.sms_message = smsResult.message || message || null;
+          logData.sms_recipient = smsResult.recipient || null;
+          logData.sms_status = smsResult.success ? 'sent' : 'failed';
+          logData.sms_error = smsResult.error || null;
+        }
       }
       
       console.log('📝 Prepared log data:', logData);

@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { formatPhoneForSmpp } = require('../utils/phone');
 
 /**
  * GET /api/sms/status
@@ -63,12 +64,12 @@ router.post('/send', async (req, res) => {
         error: 'Missing required fields: to and message are required'
       });
     }
-    
-    // Validate phone number format (Libya numbers)
-    if (!/^218[0-9]{8}$/.test(to)) {
+
+    const normalizedTo = formatPhoneForSmpp(to);
+    if (!normalizedTo) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid phone number format. Must be a valid Libya number starting with 218'
+        error: 'Invalid phone number format. Accepted: +21893…, 093…, 93…'
       });
     }
     
@@ -83,7 +84,7 @@ router.post('/send', async (req, res) => {
     
     // Send SMS
     const result = await global.smsManager.Send({
-      to,
+      to: normalizedTo,
       message,
       isWelcomeMessage
     });
