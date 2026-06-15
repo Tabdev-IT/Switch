@@ -18,6 +18,16 @@ const oracle = require('./utils/Oracle');
 // Import SMPP services
 const { Sms, SMSManager } = require('./services/smppService');
 const smppConfig = require('./config/smpp');
+const webhookConfig = require('./config/webhook');
+
+if (process.env.CLIENT_MESSAGE_BEARER_TOKEN) {
+  console.log('🔐 Client message gateway token: loaded from CLIENT_MESSAGE_BEARER_TOKEN');
+} else if (process.env.WEBHOOK_BEARER_TOKEN) {
+  console.log('🔐 Client message gateway token: loaded from WEBHOOK_BEARER_TOKEN');
+} else {
+  console.warn('⚠️  CLIENT_MESSAGE_BEARER_TOKEN is NOT set in .env — client-message auth uses the default dev token only');
+  console.warn('⚠️  Add CLIENT_MESSAGE_BEARER_TOKEN to the server .env file and restart PM2');
+}
 
 // Initialize SMPP services immediately
 console.log('📱 Initializing SMPP services...');
