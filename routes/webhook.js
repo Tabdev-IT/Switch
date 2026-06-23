@@ -1024,6 +1024,22 @@ async function processClientMessage(req, res, data) {
           phoneInput: phoneRaw
         }
       });
+    } else if (result.error === 'timeout' || result.error === 'in_progress') {
+      // Message was submitted to the SMSC but we did not get a confirmation in
+      // time (or it is already being processed). It was most likely delivered —
+      // return 202 so the caller does NOT retry and trigger duplicate sends.
+      console.warn('⏳ Client message SMS unconfirmed (accepted):', { ext_ref_no: extRefNo, to: toNumber, reason: result.error });
+      res.status(202).json({
+        success: true,
+        status: 'accepted',
+        message: 'SMS accepted for delivery; confirmation pending. Do not retry with the same ext_ref_no.',
+        data: {
+          ext_ref_no: extRefNo,
+          recipient: toNumber,
+          phoneInput: phoneRaw,
+          reason: result.error
+        }
+      });
     } else {
       console.error('❌ Client message SMS failed:', result.error);
       res.status(400).json({

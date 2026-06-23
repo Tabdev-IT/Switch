@@ -410,102 +410,104 @@ class Sms {
     const tracking = msg.isWelcomeMessage ? null : this.trackMessage(messageKey, msg);
 
     const original_sms = msg.message;
-    msg.message = gsm(msg.message);
-
-    let part_id = 0;
-    var concat_ref = Math.floor(Math.random() * 255);
-    let _timer;
+    const encoded = gsm(msg.message);
+    const parts = (encoded && encoded.parts) || [];
+    const concat_ref = Math.floor(Math.random() * 255);
+    const timeout = msg.isWelcomeMessage ? 15000 : this.RETRY_TIMEOUT;
 
     return new Promise((resolve) => {
-      if (_.size(msg.message.parts) === 1) {
-        console.log(`[${this.provider}] Sending ${msg.isWelcomeMessage ? 'welcome' : 'regular'} message to ${msg.to}`);
-        var submit_pdu = {
-          destination_addr: msg.to,
-          short_message: original_sms,
-          source_addr: '11012',
-          registered_delivery: 0
-        };
+      let settled = false;
 
-        const timeout = msg.isWelcomeMessage ? 15000 : this.RETRY_TIMEOUT;
-
-        _timer = setTimeout(() => {
-          console.log(`[${this.provider}] Message to ${msg.to} timed out after ${timeout}ms`);
-          if (!msg.isWelcomeMessage) {
+      // Single point of resolution so the promise ALWAYS resolves exactly once,
+      // even if one (or more) submit_sm_resp callbacks never come back.
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (!msg.isWelcomeMessage) {
+          if (result.success) {
+            this.messageTracker.delete(messageKey);
+          } else {
             this.updateMessageAttempts(messageKey);
           }
-          resolve({
-            error: 'timeout',
-            success: false
-          });
-        }, timeout);
+        }
+        resolve(result);
+      };
 
-        this.GetTxSession().submit_sm(submit_pdu, (pdu, er) => {
-          clearTimeout(_timer);
-          if (pdu.command_status == 0) {
-            console.log(`[${this.provider}] Message to ${msg.to} sent successfully`);
-            if (!msg.isWelcomeMessage) {
-              this.messageTracker.delete(messageKey);
-            }
-            resolve({ 
-              success: true, 
-              status: 'sent'
-            });
-          } else {
-            console.log(`[${this.provider}] Message to ${msg.to} failed with status ${pdu.command_status}`);
-            if (!msg.isWelcomeMessage) {
-              this.updateMessageAttempts(messageKey);
-            }
-            resolve({ 
-              success: false,
-              status: 'failed',
-              error: `SMPP Error: ${pdu.command_status}`
-            });
-          }
-        });
-      } else {
-        // Handle multipart messages
-        console.log(`[${this.provider}] Sending ${msg.message.parts.length}-part message to ${msg.to}`);
-        const totalParts = msg.message.parts.length;
-        let completedParts = 0;
-        let allSuccess = true;
+      // Safety net: bounds BOTH single-part and multipart sends so the HTTP
+      // caller can never hang waiting on a lost SMPP response.
+      const timer = setTimeout(() => {
+        console.log(`[${this.provider}] Message to ${msg.to} timed out after ${timeout}ms`);
+        finish({ success: false, error: 'timeout' });
+      }, timeout);
 
-        msg.message.parts.forEach((part, ix) => {
-          part_id++;
-          var udh = Buffer.alloc(6);
-          udh.write(String.fromCharCode(0x5), 0);
-          udh.write(String.fromCharCode(0x0), 1);
-          udh.write(String.fromCharCode(0x3), 2);
-          udh.write(String.fromCharCode(concat_ref), 3);
-          udh.write(String.fromCharCode(msg.message.sms_count), 4);
-          udh.write(String.fromCharCode(part_id), 5);
-
-          var submit_pdu = {
-            source_addr: '11012',
+      try {
+        if (_.size(parts) <= 1) {
+          console.log(`[${this.provider}] Sending ${msg.isWelcomeMessage ? 'welcome' : 'regular'} message to ${msg.to}`);
+          const submit_pdu = {
             destination_addr: msg.to,
-            short_message: { udh: udh, message: part },
+            short_message: original_sms,
+            source_addr: '11012',
             registered_delivery: 0
           };
 
-          this.GetTxSession().submit_sm(submit_pdu, (pdu, er) => {
-            completedParts++;
-            if (pdu.command_status !== 0) {
-              allSuccess = false;
-            }
-
-            if (completedParts === totalParts) {
-              if (allSuccess) {
-                this.messageTracker.delete(messageKey);
-                resolve({ success: true });
-              } else {
-                this.updateMessageAttempts(messageKey);
-                resolve({ success: false });
-              }
+          this.GetTxSession().submit_sm(submit_pdu, (pdu) => {
+            if (pdu && pdu.command_status === 0) {
+              console.log(`[${this.provider}] Message to ${msg.to} sent successfully`);
+              finish({ success: true, status: 'sent' });
+            } else {
+              const status = pdu ? pdu.command_status : 'no_response';
+              console.log(`[${this.provider}] Message to ${msg.to} failed with status ${status}`);
+              finish({ success: false, status: 'failed', error: `SMPP Error: ${status}` });
             }
           });
-        });
+        } else {
+          // Handle multipart messages
+          console.log(`[${this.provider}] Sending ${parts.length}-part message to ${msg.to}`);
+          const totalParts = parts.length;
+          let completedParts = 0;
+          let allSuccess = true;
+          let part_id = 0;
+
+          parts.forEach((part) => {
+            part_id++;
+            const udh = Buffer.alloc(6);
+            udh.write(String.fromCharCode(0x5), 0);
+            udh.write(String.fromCharCode(0x0), 1);
+            udh.write(String.fromCharCode(0x3), 2);
+            udh.write(String.fromCharCode(concat_ref), 3);
+            udh.write(String.fromCharCode(encoded.sms_count), 4);
+            udh.write(String.fromCharCode(part_id), 5);
+
+            const submit_pdu = {
+              source_addr: '11012',
+              destination_addr: msg.to,
+              short_message: { udh: udh, message: part },
+              registered_delivery: 0
+            };
+
+            this.GetTxSession().submit_sm(submit_pdu, (pdu) => {
+              completedParts++;
+              if (!pdu || pdu.command_status !== 0) {
+                allSuccess = false;
+              }
+
+              if (completedParts === totalParts) {
+                if (allSuccess) {
+                  console.log(`[${this.provider}] All ${totalParts} parts to ${msg.to} sent successfully`);
+                  finish({ success: true, status: 'sent' });
+                } else {
+                  console.log(`[${this.provider}] One or more parts to ${msg.to} failed`);
+                  finish({ success: false, status: 'failed', error: 'SMPP multipart error' });
+                }
+              }
+            });
+          });
+        }
+      } catch (err) {
+        console.error(`[${this.provider}] Error sending message to ${msg.to}:`, err);
+        finish({ success: false, error: err.message });
       }
-    }).finally(() => {
-      clearTimeout(_timer);
     });
   }
 
