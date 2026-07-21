@@ -114,7 +114,7 @@ async function getDebitedTransfersForDate(libyaDate) {
 /** Last-resort: no date filter (may be heavier). */
 async function getDebitedTransfersUnfiltered() {
 	const url = `${BASE_URL}/api/v1/payments/debited-funds-transfers`;
-	console.log('📅 LY Pay API call without date filter (fallback)');
+	console.log('📅 LY Payy API call without date filter (fallback)');
 
 	let response;
 	try {
