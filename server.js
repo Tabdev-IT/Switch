@@ -30,6 +30,12 @@ if (process.env.CLIENT_MESSAGE_BEARER_TOKEN) {
   console.warn('⚠️  Add CLIENT_MESSAGE_BEARER_TOKEN to the server .env file and restart PM2');
 }
 
+if (process.env.COMMERCE_LYPAY_TOKEN || process.env.COMMERCE_LYPAY_BEARER_TOKEN) {
+  console.log('🔐 Commerce LyPay token: loaded from env');
+} else {
+  console.warn('⚠️  COMMERCE_LYPAY_TOKEN not set — using built-in default token (set env for production)');
+}
+
 // Initialize SMPP services immediately
 console.log('📱 Initializing SMPP services...');
 const SMS_Libyana = new Sms('Libyana', smppConfig.smpp.libyana);

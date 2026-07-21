@@ -23,6 +23,15 @@ function otpMaxAttempts() {
   return Number(process.env.COMMERCE_LYPAY_OTP_MAX_ATTEMPTS || 3);
 }
 
+/** UAT: skip Oracle/NAD account lookup — IBANs are already registered on LyPay. Default on. */
+function skipAccountLookup() {
+  return String(process.env.COMMERCE_LYPAY_SKIP_ORACLE ?? 'true').toLowerCase() !== 'false';
+}
+
+function uatOtpPhone() {
+  return process.env.COMMERCE_LYPAY_UAT_PHONE || '0923686840';
+}
+
 function success(data = {}) {
   return { status: { code: 'SUCCESS' }, data };
 }
@@ -224,6 +233,22 @@ async function resolveDebtor(schema, identification) {
 
   if (!iban) return { error: fail('INVALID_REQUEST', 'debtorAccountIdentification is required') };
 
+  // UAT: trust request IBANs (already registered on LyPay) — no Oracle lookup.
+  if (skipAccountLookup()) {
+    const phone = uatOtpPhone();
+    const switchIdentifier = toOtpIdentifier(phone);
+    const core = extractCoreAccountFromIban(iban) || '';
+    log(`commerce_lypay UAT: skip Oracle lookup, iban=${iban}, otpPhone=${phone}`);
+    return {
+      accountNo: core,
+      iban,
+      name: 'Customer',
+      phone: FormatContactNumber(phone) || phone,
+      switchIdentifier,
+      bankCode: bankCodeFromIban(iban) || ourBankCode()
+    };
+  }
+
   let account = await oracle.getCblInfoByIban(iban);
   if (!account) {
     const core = extractCoreAccountFromIban(iban);
@@ -292,11 +317,17 @@ async function initiate(body) {
 
   const debtor = await resolveDebtor(body?.debtorAccountSchema, body?.debtorAccountIdentification);
   if (debtor.error) return debtor.error;
-  if (debtor.bankCode && debtor.bankCode !== ourBank) {
+  if (!skipAccountLookup() && debtor.bankCode && debtor.bankCode !== ourBank) {
     return fail('MISROUTED', 'Debtor IBAN does not belong to this bank');
   }
 
-  const creditor = await enrichCreditor(creditorIban, body?.creditorBankCode);
+  const creditor = skipAccountLookup()
+    ? {
+        name: 'Merchant',
+        bankName: 'مصرف',
+        bankCode: normBankCode(body?.creditorBankCode) || bankCodeFromIban(creditorIban)
+      }
+    : await enrichCreditor(creditorIban, body?.creditorBankCode);
   const bankReference = newBankReference();
 
   try {
@@ -344,7 +375,8 @@ async function runGatewayDebit(row) {
   const paymentReferenceId = row.paymentReferenceId;
   const amountLyd = Number(row.amount) / 1000;
 
-  if (row.debtorAccountNo) {
+  // UAT skips Oracle balance — LyPay already knows the registered accounts.
+  if (!skipAccountLookup() && row.debtorAccountNo) {
     const bal = await oracle.getWithdrawableBalance(row.debtorAccountNo);
     if (Number.isFinite(bal) && bal < amountLyd) {
       row.paymentStatus = 'INSUFFICIENT_FUNDS';

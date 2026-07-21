@@ -5,22 +5,31 @@ const log = require('../utils/logger');
 
 const router = express.Router();
 
-function commerceBearerAuth(req, res, next) {
-  const expected = process.env.COMMERCE_LYPAY_BEARER_TOKEN || '';
-  if (!expected) {
-    return res.status(503).json({
-      status: { code: 'BANK_ERROR', errorInfo: { Message: 'Commerce API not configured' } }
-    });
+/** Authorization header = raw token (optional "Bearer " prefix still accepted). */
+function extractAuthToken(authHeader) {
+  if (!authHeader) return '';
+  const value = String(authHeader).trim();
+  if (/^bearer\s+/i.test(value)) {
+    return value.replace(/^bearer\s+/i, '').trim();
   }
+  return value;
+}
 
-  const header = (req.headers.authorization || '').trim();
-  if (!header) {
+function commerceTokenAuth(req, res, next) {
+  // Prefer env; fall back to a fixed UAT/dev token so the API is usable without .env.
+  const expected = (
+    process.env.COMMERCE_LYPAY_TOKEN ||
+    process.env.COMMERCE_LYPAY_BEARER_TOKEN ||
+    '2dc9bb48a314e32142e8c2dc650be86d9445f9b1a262895851d2bd026cf6a4d1'
+  ).trim();
+
+  const provided = extractAuthToken(req.headers.authorization);
+  if (!provided) {
     return res.status(401).json({
       status: { code: 'UNAUTHORIZED', errorInfo: { Message: 'Missing Authorization token' } }
     });
   }
 
-  const provided = header.startsWith('Bearer ') ? header.slice(7).trim() : header;
   const a = Buffer.from(provided);
   const b = Buffer.from(String(expected));
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
@@ -31,7 +40,7 @@ function commerceBearerAuth(req, res, next) {
   next();
 }
 
-router.use(commerceBearerAuth);
+router.use(commerceTokenAuth);
 
 router.post('/initiate', async (req, res) => {
   try {
