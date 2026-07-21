@@ -42,6 +42,12 @@ UAT skips Oracle/NAD account lookup by default (`COMMERCE_LYPAY_SKIP_ORACLE=true
 
 Override with env: `LYPAY_BASE_URL`, `LYPAY_TOKEN`.
 
-## Risk note
+## Status (live LyPay)
 
-`switchTransactionId` is mapped from gateway confirm/initiate `uuid` / `numoNotice.uuid`. Confirm against a live gateway response before CBL UAT.
+`POST /status` now polls LyPay (`GET /funds-transfers/{uuid}` + debited-list fallback):
+
+| LyPay status | We return |
+| --- | --- |
+| `completed` | `CONFIRMED` |
+| `declined` / `failed` | `REJECTED` |
+| `processing` / other | `PROCESSING` |

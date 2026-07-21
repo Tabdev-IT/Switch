@@ -591,32 +591,154 @@ async function confirm(body) {
   return runGatewayDebit(claimed);
 }
 
+function mapLyPayStatusName(data) {
+  if (!data || typeof data !== 'object') return '';
+  const root = data.data && typeof data.data === 'object' ? data.data : data;
+  const status = root.status;
+  if (typeof status === 'string') return status.trim().toLowerCase();
+  if (status && typeof status === 'object') {
+    return String(status.name || status.status || '').trim().toLowerCase();
+  }
+  return String(root.statusName || '').trim().toLowerCase();
+}
+
+/**
+ * Map LyPay gateway status → Commerce /status paymentStatus.
+ * completed → CONFIRMED | declined/failed → REJECTED | else still PROCESSING
+ */
+function commerceStatusFromLyPay(lyPayName) {
+  const s = String(lyPayName || '').toLowerCase();
+  if (!s) return null;
+  if (s === 'completed' || s === 'complete' || s === 'success' || s === 'succeeded') {
+    return 'CONFIRMED';
+  }
+  if (
+    s === 'declined' ||
+    s === 'failed' ||
+    s === 'rejected' ||
+    s === 'cancelled' ||
+    s === 'canceled' ||
+    s === 'error'
+  ) {
+    return 'REJECTED';
+  }
+  // acknowledged / processing / pending / …
+  return 'PROCESSING';
+}
+
+async function refreshStatusFromLyPay(row) {
+  const uuid = row.lypayUuid || row.switchTransactionId;
+  if (!uuid) return null;
+
+  let gatewayData = null;
+  try {
+    const result = await LyPayService.getFundsTransferStatus(uuid, {
+      paymentReference: row.lypayPaymentReference,
+      transactionTimestamp: row.lypayTransactionTimestamp
+    });
+    if (result.ok) {
+      gatewayData = result.data?.data || result.data || null;
+    } else {
+      log(`commerce_lypay status GET HTTP ${result.status} for ${uuid}`);
+    }
+  } catch (e) {
+    log(`commerce_lypay status GET failed: ${e.message}`);
+  }
+
+  // Fallback: debited list by payment reference (same pattern as webhooks)
+  if (!gatewayData && row.lypayPaymentReference) {
+    try {
+      gatewayData = await LyPayService.findDebitedByPaymentReference(row.lypayPaymentReference);
+    } catch (e) {
+      log(`commerce_lypay debited fallback failed: ${e.message}`);
+    }
+  }
+
+  if (!gatewayData) return null;
+
+  const lyName = mapLyPayStatusName(gatewayData);
+  const mapped = commerceStatusFromLyPay(lyName);
+  if (!mapped) return null;
+
+  const switchId =
+    extractSwitchTransactionId(gatewayData) || row.switchTransactionId || '';
+
+  // Persist durable terminal / processing label from LyPay
+  const prev = row.paymentStatus;
+  if (mapped === 'CONFIRMED') {
+    row.paymentStatus = 'CONFIRMED';
+  } else if (mapped === 'REJECTED') {
+    row.paymentStatus = 'FAILED';
+    row.lastError = row.lastError || `LyPay status: ${lyName}`;
+  } else if (mapped === 'PROCESSING' && (prev === 'PROCESSING' || prev === 'CONFIRMING' || prev === 'CONFIRMED')) {
+    row.paymentStatus = 'PROCESSING';
+  }
+  if (switchId && !row.switchTransactionId) {
+    row.switchTransactionId = switchId;
+  }
+  row.gatewayConfirmResponse = row.gatewayConfirmResponse || gatewayData;
+  await row.save();
+
+  return { paymentStatus: mapped, switchTransactionId: row.switchTransactionId || switchId || undefined, lyPayStatus: lyName };
+}
+
 async function status(body) {
   const paymentReferenceId = String(body?.paymentReferenceId || '').trim();
   if (!UUID_RE.test(paymentReferenceId)) {
     return fail('INVALID_REQUEST', 'paymentReferenceId must be a UUID');
   }
 
-  const row = await CommerceLypayPayment.findOne({ paymentReferenceId });
+  let row = await CommerceLypayPayment.findOne({ paymentReferenceId });
   if (!row) {
     return success({ paymentStatus: 'NOT_FOUND' });
   }
 
+  // Local terminal OTP / funds failures — no LyPay txn to poll
+  if (
+    row.paymentStatus === 'OTP_RETRIES_EXCEEDED' ||
+    row.paymentStatus === 'INSUFFICIENT_FUNDS' ||
+    (row.paymentStatus === 'FAILED' && !row.lypayUuid && !row.switchTransactionId)
+  ) {
+    return success({ paymentStatus: 'REJECTED' });
+  }
+
+  if (row.paymentStatus === 'AWAITING_OTP') {
+    return success({ paymentStatus: 'AWAITING_OTP' });
+  }
+
+  if (row.paymentStatus === 'CONFIRMING' && !row.lypayUuid && !row.switchTransactionId) {
+    return success({ paymentStatus: 'CONFIRMING' });
+  }
+
+  // After confirm (or mid-flight with uuid): ask LyPay for live status
+  if (row.lypayUuid || row.switchTransactionId) {
+    const live = await refreshStatusFromLyPay(row);
+    if (live) {
+      const data = { paymentStatus: live.paymentStatus };
+      if (live.switchTransactionId && (live.paymentStatus === 'CONFIRMED' || live.paymentStatus === 'PROCESSING')) {
+        data.switchTransactionId = live.switchTransactionId;
+      }
+      return success(data);
+    }
+  }
+
+  // LyPay unreachable — fall back to local record
   let paymentStatus = row.paymentStatus;
   if (row.switchTransactionId && (paymentStatus === 'PROCESSING' || paymentStatus === 'CONFIRMED')) {
-    paymentStatus = 'CONFIRMED';
+    // Without live LyPay, keep PROCESSING (not CONFIRMED) so Commerce knows settlement isn't verified here
+    paymentStatus = 'PROCESSING';
   } else if (
     paymentStatus === 'OTP_RETRIES_EXCEEDED' ||
     paymentStatus === 'INSUFFICIENT_FUNDS' ||
     paymentStatus === 'FAILED'
   ) {
     paymentStatus = 'REJECTED';
-  } else if (paymentStatus === 'PROCESSING' && !row.switchTransactionId) {
+  } else if (paymentStatus === 'CONFIRMING') {
     paymentStatus = 'CONFIRMING';
   }
 
   const data = { paymentStatus };
-  if (paymentStatus === 'CONFIRMED' && row.switchTransactionId) {
+  if (row.switchTransactionId && (paymentStatus === 'CONFIRMED' || paymentStatus === 'PROCESSING')) {
     data.switchTransactionId = row.switchTransactionId;
   }
   return success(data);

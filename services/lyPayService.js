@@ -290,7 +290,8 @@ module.exports = {
 	getDebitedTransfersUnfiltered,
 	findDebitedByPaymentReference,
 	initiateFundsTransfer,
-	confirmFundsTransfer
+	confirmFundsTransfer,
+	getFundsTransferStatus
 };
 
 /**
@@ -327,6 +328,28 @@ async function confirmFundsTransfer(uuid, { paymentReference, transactionTimesta
 				Authorization: `Bearer ${BEARER_TOKEN}`,
 				Accept: 'application/json',
 				'Content-Type': 'application/json'
+			},
+			timeout: 20000
+		})
+	);
+	return { ok: response.status >= 200 && response.status < 300, status: response.status, data: response.data };
+}
+
+/**
+ * Status — GET /api/v1/payments/funds-transfers/{uuid}
+ */
+async function getFundsTransferStatus(uuid, { paymentReference, transactionTimestamp } = {}) {
+	const url = `${BASE_URL}/api/v1/payments/funds-transfers/${uuid}`;
+	const params = {};
+	if (paymentReference) params.paymentReference = paymentReference;
+	if (transactionTimestamp) params.transactionTimestamp = transactionTimestamp;
+	const response = await axios.get(
+		url,
+		lyPayAxiosConfig({
+			params,
+			headers: {
+				Authorization: `Bearer ${BEARER_TOKEN}`,
+				Accept: 'application/json'
 			},
 			timeout: 20000
 		})
