@@ -13,6 +13,7 @@ const webhookRoutes = require('./routes/webhook');
 const fxHouseRoutes = require('./routes/fxHouse');
 const authRoutes = require('./routes/auth');
 const otpRoutes = require('./routes/otp');
+const commerceLypayRoutes = require('./routes/commerceLypay');
 const oracle = require('./utils/Oracle');
 
 // Import SMPP services
@@ -85,6 +86,7 @@ app.use('/api/sms', smsRoutes);
 app.use('/api/fx', fxHouseRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/otp', otpRoutes);
+app.use('/commerce/lypay', commerceLypayRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

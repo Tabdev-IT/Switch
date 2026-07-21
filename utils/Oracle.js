@@ -387,6 +387,42 @@ class Oracle {
         const result = await this.execute(sql, { customerNumber });
         return result.rows;
     }
+
+    /** CBL_INFO row by core account number. */
+    async getCblInfoByAccount(accountNumber) {
+        const acc = String(accountNumber || '').replace(/\s+/g, '').trim();
+        if (!acc) return null;
+        const sql = `SELECT * FROM FLXCUBP.CBL_INFO WHERE TRIM(CUST_AC_NO) = :acc`;
+        const result = await this.execute(sql, { acc });
+        return result.rows?.[0] || null;
+    }
+
+    /** CBL_INFO row by IBAN (spaces stripped). */
+    async getCblInfoByIban(iban) {
+        const norm = String(iban || '').replace(/\s+/g, '').toUpperCase().trim();
+        if (!norm) return null;
+        const sql = `
+            SELECT * FROM FLXCUBP.CBL_INFO
+            WHERE UPPER(REPLACE(TRIM(IBAN_AC_NO), ' ', '')) = :iban
+        `;
+        const result = await this.execute(sql, { iban: norm });
+        return result.rows?.[0] || null;
+    }
+
+    /** Withdrawable balance for an account (LYD). */
+    async getWithdrawableBalance(accountNumber) {
+        const acc = String(accountNumber || '').replace(/\s+/g, '').trim();
+        if (!acc) return 0;
+        const sql = `
+            SELECT ACY_WITHDRAWABLE_BAL as BALANCE
+            FROM FLXCUBP.STTM_ACCOUNT_BALANCE
+            WHERE TRIM(CUST_AC_NO) = :acc
+        `;
+        const result = await this.execute(sql, { acc });
+        const bal = result.rows?.[0]?.BALANCE;
+        const n = typeof bal === 'number' ? bal : parseFloat(String(bal));
+        return Number.isFinite(n) ? n : 0;
+    }
 }
 
 module.exports = new Oracle();

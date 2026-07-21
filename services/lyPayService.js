@@ -1,18 +1,30 @@
 const axios = require('axios');
 const https = require('https');
 
-// Ly Pay (hardcoded as requested — full list URL is BASE_URL + /api/v1/...)
-const BASE_URL = 'https://10.106.0.30';
-const BEARER_TOKEN = 'XlL2MtQbEJaBm08R56gOmzdp9etfyIxF0SPFZKF508eb021c';
+// Ly Pay UAT (override via LYPAY_BASE_URL / LYPAY_TOKEN). Path = BASE + /api/v1/payments/...
+const BASE_URL = (process.env.LYPAY_BASE_URL || 'http://10.106.0.43:80').replace(/\/$/, '');
+const BEARER_TOKEN =
+	process.env.LYPAY_TOKEN || '982LHCFAp7KblH9mG1sWg1lDg1sHTd95kbCiGT8Q2d514d5e';
 
-// Internal HTTPS: corporate/self-signed cert — Node default CA store fails verification.
-// This matches “it works in Postman” behaviour for this internal host.
-const httpsAgent = new https.Agent({ rejectUnauthorized: false });
-console.warn('⚠️ Ly Pay TLS verification is DISABLED for https://10.106.0.30 (internal CA).');
+const useHttps = BASE_URL.startsWith('https://');
+const httpsAgent = useHttps
+	? new https.Agent({
+			rejectUnauthorized: String(process.env.LYPAY_INSECURE_TLS ?? 'true').toLowerCase() !== 'false'
+				? false
+				: undefined
+	  })
+	: undefined;
+
+if (useHttps) {
+	console.warn(`⚠️ Ly Pay TLS verification disabled for ${BASE_URL} (internal CA).`);
+} else {
+	console.log(`📡 Ly Pay gateway: ${BASE_URL}`);
+}
 
 function lyPayAxiosConfig(extra = {}) {
 	const base = { timeout: extra.timeout ?? 15000, validateStatus: () => true };
-	return { ...base, httpsAgent, ...extra };
+	if (httpsAgent) base.httpsAgent = httpsAgent;
+	return { ...base, ...extra };
 }
 
 function normalizeList(data) {
@@ -276,5 +288,48 @@ module.exports = {
 	getDebitedTransfers,
 	getDebitedTransfersForDate,
 	getDebitedTransfersUnfiltered,
-	findDebitedByPaymentReference
+	findDebitedByPaymentReference,
+	initiateFundsTransfer,
+	confirmFundsTransfer
 };
+
+/**
+ * Initiate P2P funds transfer — POST /api/v1/payments/funds-transfers
+ * @returns {{ ok: boolean, status: number, data: any }}
+ */
+async function initiateFundsTransfer(payload) {
+	const url = `${BASE_URL}/api/v1/payments/funds-transfers`;
+	const response = await axios.post(
+		url,
+		payload,
+		lyPayAxiosConfig({
+			headers: {
+				Authorization: `Bearer ${BEARER_TOKEN}`,
+				Accept: 'application/json',
+				'Content-Type': 'application/json'
+			},
+			timeout: 20000
+		})
+	);
+	return { ok: response.status >= 200 && response.status < 300, status: response.status, data: response.data };
+}
+
+/**
+ * Confirm funds transfer — POST /api/v1/payments/funds-transfers/{uuid}/confirm
+ */
+async function confirmFundsTransfer(uuid, { paymentReference, transactionTimestamp }) {
+	const url = `${BASE_URL}/api/v1/payments/funds-transfers/${uuid}/confirm`;
+	const response = await axios.post(
+		url,
+		{ paymentReference, transactionTimestamp },
+		lyPayAxiosConfig({
+			headers: {
+				Authorization: `Bearer ${BEARER_TOKEN}`,
+				Accept: 'application/json',
+				'Content-Type': 'application/json'
+			},
+			timeout: 20000
+		})
+	);
+	return { ok: response.status >= 200 && response.status < 300, status: response.status, data: response.data };
+}
