@@ -8,9 +8,11 @@ class SmsService {
      * @param {string} phoneNumber - The intended recipient's phone number.
      * @param {string} otpCode - The OTP code to send.
      */
-    async sendOtpSms(phoneNumber, otpCode) {
-        // OVERRIDE FOR TESTING
-        const testingPhoneNumber = '0923686840';
+    async sendOtpSms(phoneNumber, otpCode, options = {}) {
+        // Default: testing override. Commerce can pass deliverTo to hit a real handset.
+        const testingPhoneNumber = options.deliverTo
+            ? String(options.deliverTo).trim()
+            : '0923686840';
 
         log(`[TESTING OVERRIDE] Redirecting SMS intended for ${phoneNumber} to ${testingPhoneNumber}`);
 
@@ -22,6 +24,8 @@ class SmsService {
                 let formatNumber = testingPhoneNumber;
                 if (formatNumber.startsWith('09')) {
                     formatNumber = '218' + formatNumber.substring(1);
+                } else if (formatNumber.startsWith('9') && formatNumber.length === 10) {
+                    formatNumber = '218' + formatNumber;
                 }
 
                 log(`Attempting to send OTP SMS via SMPP to ${formatNumber}`);

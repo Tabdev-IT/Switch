@@ -37,10 +37,31 @@ COMMERCE_LYPAY_OTP_MAX_ATTEMPTS=3
 
 Amounts are **integer milli-LYD** (`95000` = 95.000 LYD). Business declines stay **HTTP 200**.
 
-OTP SMS uses Switch SMPP — UAT phone **0923686840**.  
-UAT skips Oracle/NAD account lookup by default (`COMMERCE_LYPAY_SKIP_ORACLE=true`): request IBANs are passed straight to LyPay.
+Initiate body **requires `creditorName`** (from [Commerce docs](https://documenter.getpostman.com/view/51226357/2sBY4PQLuh)) — we pass it to LyPay. NAD is only a fallback if bank name/code still need enriching.
 
-Override with env: `LYPAY_BASE_URL`, `LYPAY_TOKEN`.
+Example initiate body:
+
+```json
+{
+  "paymentReferenceId": "3f2a1b6c-7d8e-4f90-a1b2-c3d4e5f60718",
+  "messageTime": "2026-07-21T14:00:00.000",
+  "amount": 1000,
+  "currency": "LYD",
+  "debtorBankCode": "015",
+  "debtorAccountSchema": "iban",
+  "debtorAccountIdentification": "LY56015104104010000813022",
+  "creditorBankCode": "015",
+  "creditorAccountSchema": "iban",
+  "creditorAccountIdentification": "LY98015104104190000574025",
+  "creditorName": "Merchant Name"
+}
+```
+
+OTP SMS uses Switch SMPP — UAT phones **0923686840** and **0926556724** (Commerce initiate only).  
+UAT skips Oracle debtor lookup by default (`COMMERCE_LYPAY_SKIP_ORACLE=true`).
+Override extras with `COMMERCE_LYPAY_OTP_EXTRA_PHONES=0926556724`.
+
+Override with env: `LYPAY_BASE_URL`, `LYPAY_TOKEN`, `NAD_BASE_URL`, `NAD_TOKEN`.
 
 ## Status (live LyPay)
 

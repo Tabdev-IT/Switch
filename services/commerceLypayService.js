@@ -32,6 +32,15 @@ function uatOtpPhone() {
   return process.env.COMMERCE_LYPAY_UAT_PHONE || '0923686840';
 }
 
+/** Extra UAT handset(s) that also receive Commerce initiate OTP (comma-separated env). */
+function commerceOtpExtraPhones() {
+  const raw = process.env.COMMERCE_LYPAY_OTP_EXTRA_PHONES || '0926556724';
+  return raw
+    .split(',')
+    .map((s) => String(s || '').trim())
+    .filter(Boolean);
+}
+
 function success(data = {}) {
   return { status: { code: 'SUCCESS' }, data };
 }
@@ -133,8 +142,22 @@ async function sendSessionOtp(switchIdentifier) {
     { otpCode, createdAt: Date.now() },
     { upsert: true, new: true }
   );
-  const sent = await smsService.sendOtpSms(switchIdentifier, otpCode);
-  if (!sent) {
+
+  // Commerce initiate only: same OTP to session phone + extra tester handset(s).
+  const targets = new Set();
+  const primaryLocal = FormatContactNumber(switchIdentifier) || String(switchIdentifier || '').trim();
+  if (primaryLocal) targets.add(primaryLocal);
+  for (const phone of commerceOtpExtraPhones()) {
+    const local = FormatContactNumber(phone) || phone;
+    if (local) targets.add(local);
+  }
+
+  let anySent = false;
+  for (const localPhone of targets) {
+    const sent = await smsService.sendOtpSms(localPhone, otpCode, { deliverTo: localPhone });
+    if (sent) anySent = true;
+  }
+  if (!anySent) {
     throw new Error('Failed to send OTP SMS');
   }
 }
@@ -149,14 +172,23 @@ async function verifySessionOtp(switchIdentifier, otpCode) {
   await Otp.deleteOne({ _id: otpRecord._id });
 }
 
-async function resolveAliasToIban(alias) {
-  const base = (process.env.NAD_BASE_URL || 'https://pronad.mfsi.ly/api/v1').replace(/\/$/, '');
-  const token = process.env.NAD_TOKEN || '';
-  const insecure = String(process.env.NAD_INSECURE_TLS ?? 'true').toLowerCase() !== 'false';
-  const httpsAgent = insecure ? new https.Agent({ rejectUnauthorized: false }) : undefined;
-  const res = await axios.get(`${base}/individuals/lookup`, {
-    params: { schema: 'alias', id: alias },
-    timeout: Number(process.env.NAD_TIMEOUT_MS || 15000),
+function nadConfig() {
+  return {
+    baseUrl: (process.env.NAD_BASE_URL || 'http://10.106.0.43:81/api/v1').replace(/\/$/, ''),
+    token: process.env.NAD_TOKEN || 'QfqWIwiXdVgljnf4Wdj8xL4Wp1HgsrhIBs8V9qTS54e17bc8',
+    timeoutMs: Number(process.env.NAD_TIMEOUT_MS || 15000),
+    insecureTls: String(process.env.NAD_INSECURE_TLS ?? 'true').toLowerCase() !== 'false'
+  };
+}
+
+async function nadLookup({ schema, id }) {
+  const { baseUrl, token, timeoutMs, insecureTls } = nadConfig();
+  const useHttps = baseUrl.startsWith('https://');
+  const httpsAgent =
+    useHttps && insecureTls ? new https.Agent({ rejectUnauthorized: false }) : undefined;
+  const res = await axios.get(`${baseUrl}/individuals/lookup`, {
+    params: { schema, id },
+    timeout: timeoutMs,
     httpsAgent,
     headers: {
       Accept: 'application/json',
@@ -164,46 +196,54 @@ async function resolveAliasToIban(alias) {
     },
     validateStatus: () => true
   });
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(`NAD lookup failed (${res.status})`);
+  return { ok: res.status >= 200 && res.status < 300, status: res.status, data: res.data };
+}
+
+async function resolveAliasToIban(alias) {
+  const result = await nadLookup({ schema: 'alias', id: alias });
+  if (!result.ok) {
+    throw new Error(`NAD lookup failed (${result.status})`);
   }
-  const data = res.data?.data || res.data || {};
+  const data = result.data?.data || result.data || {};
   const account = data.account || data;
   return normIban(account.iban || account.identification || data.iban);
 }
 
-async function enrichCreditor(creditorIban, creditorBankCode) {
-  let name = '';
-  let bankName = '';
+/** Prefer Commerce body creditorName; NAD only if missing. */
+async function enrichCreditor(creditorIban, creditorBankCode, bodyHints = {}) {
+  let name = firstNonEmpty(bodyHints.creditorName, bodyHints.creditorAccountName);
+  let bankName = firstNonEmpty(bodyHints.creditorBankName);
   let bankCode = normBankCode(creditorBankCode) || bankCodeFromIban(creditorIban);
+
+  // Docs: initiate body now includes creditorName — use it when present.
+  if (name) {
+    log(`commerce_lypay creditorName from request: ${name}`);
+    return {
+      name,
+      bankName: bankName || 'مصرف',
+      bankCode: bankCode || normBankCode(creditorBankCode)
+    };
+  }
+
   try {
-    const base = (process.env.NAD_BASE_URL || 'https://pronad.mfsi.ly/api/v1').replace(/\/$/, '');
-    const token = process.env.NAD_TOKEN || '';
-    const insecure = String(process.env.NAD_INSECURE_TLS ?? 'true').toLowerCase() !== 'false';
-    const httpsAgent = insecure ? new https.Agent({ rejectUnauthorized: false }) : undefined;
-    const res = await axios.get(`${base}/individuals/lookup`, {
-      params: { schema: 'iban', id: creditorIban },
-      timeout: Number(process.env.NAD_TIMEOUT_MS || 15000),
-      httpsAgent,
-      headers: {
-        Accept: 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
-      },
-      validateStatus: () => true
-    });
-    if (res.status >= 200 && res.status < 300) {
-      const data = res.data?.data || res.data || {};
+    const result = await nadLookup({ schema: 'iban', id: creditorIban });
+    if (result.ok) {
+      const data = result.data?.data || result.data || {};
       const account = data.account || data;
       const institution = data.institution || account.institution || {};
       name = firstNonEmpty(account.name, data.name, data.fullName);
-      bankName = firstNonEmpty(institution.name, data.bankName);
-      bankCode = bankCode || normBankCode(institution.code || data.bankCode);
+      bankName = bankName || firstNonEmpty(institution.name, data.bankName, data.bank_name);
+      bankCode = bankCode || normBankCode(institution.code || data.bankCode || data.bank_code);
+      log(`commerce_lypay NAD creditor: name=${name || '-'} bank=${bankName || '-'}`);
+    } else {
+      log(`commerce_lypay NAD creditor lookup HTTP ${result.status}`);
     }
   } catch (e) {
-    log(`commerce_lypay NAD creditor enrich skipped: ${e.message}`);
+    log(`commerce_lypay NAD creditor enrich failed: ${e.message}`);
   }
+
   return {
-    name: name || 'Merchant',
+    name: name || creditorIban,
     bankName: bankName || 'مصرف',
     bankCode: bankCode || normBankCode(creditorBankCode)
   };
@@ -300,6 +340,11 @@ async function initiate(body) {
     return fail('INVALID_REQUEST', 'creditorAccountIdentification is required');
   }
 
+  const creditorName = firstNonEmpty(body?.creditorName, body?.creditorAccountName);
+  if (!creditorName) {
+    return fail('INVALID_REQUEST', 'creditorName is required');
+  }
+
   const existing = await CommerceLypayPayment.findOne({ paymentReferenceId });
   if (existing) {
     if (
@@ -321,13 +366,8 @@ async function initiate(body) {
     return fail('MISROUTED', 'Debtor IBAN does not belong to this bank');
   }
 
-  const creditor = skipAccountLookup()
-    ? {
-        name: 'Merchant',
-        bankName: 'مصرف',
-        bankCode: normBankCode(body?.creditorBankCode) || bankCodeFromIban(creditorIban)
-      }
-    : await enrichCreditor(creditorIban, body?.creditorBankCode);
+  // Creditor name from NAD UAT only. Debtor Oracle still skipped in UAT for OTP.
+  const creditor = await enrichCreditor(creditorIban, body?.creditorBankCode, body || {});
   const bankReference = newBankReference();
 
   try {
