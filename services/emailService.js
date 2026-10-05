@@ -2,14 +2,12 @@ const nodemailer = require('nodemailer');
 const log = require('../utils/logger');
 
 function smtpConfig() {
-    const host = process.env.SMTP_HOST || 'mail.tab.ly';
-    const port = Number(process.env.SMTP_PORT || 465);
-    const user = process.env.SMTP_USER || 'ebanking@tab.ly';
-    const pass = process.env.SMTP_PASS || 'TabTab@2021';
-    const from = process.env.SMTP_FROM || '"مصرف التضامن" <ebanking@tab.ly>';
-    const secure = process.env.SMTP_SECURE != null
-        ? process.env.SMTP_SECURE === '1' || process.env.SMTP_SECURE === 'true'
-        : port === 465;
+    const host = String(process.env.SMTP_HOST || '').trim();
+    const port = Number(process.env.SMTP_PORT);
+    const user = String(process.env.SMTP_USER || '').trim();
+    const pass = String(process.env.SMTP_PASS || '');
+    const from = String(process.env.SMTP_FROM || '').trim();
+    const secure = process.env.SMTP_SECURE === '1' || process.env.SMTP_SECURE === 'true';
     return { host, port, user, pass, from, secure };
 }
 
@@ -22,7 +20,7 @@ let transporter;
 function mailer() {
     if (transporter) return transporter;
     const smtp = smtpConfig();
-    if (!smtp.host || !smtp.user || !smtp.pass) return null;
+    if (!smtp.host || !smtp.user || !smtp.pass || !smtp.from || !Number.isFinite(smtp.port)) return null;
     transporter = nodemailer.createTransport({
         host: smtp.host,
         port: smtp.port,
