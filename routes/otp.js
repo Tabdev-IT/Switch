@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Otp = require('../models/Otp');
 const smsService = require('../services/smsService');
+const { sendOtpEmail, isEmail } = require('../services/emailService');
 const log = require('../utils/logger');
 
 // Generate a random 6-digit number
@@ -15,7 +16,7 @@ function generateOTP() {
  */
 router.post('/send', async (req, res) => {
     try {
-        const { phoneNumber, identifier } = req.body;
+        const { phoneNumber, identifier, email } = req.body;
         const targetId = phoneNumber || identifier;
 
         if (!targetId) {
@@ -33,6 +34,9 @@ router.post('/send', async (req, res) => {
 
         // Send the SMS (ignores real phone number for testing)
         await smsService.sendOtpSms(targetId, otpCode);
+        if (isEmail(email)) {
+            await sendOtpEmail(email, otpCode);
+        }
 
         log(`✅ OTP generated and sent for: ${targetId}`);
 
