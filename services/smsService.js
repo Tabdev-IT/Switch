@@ -37,6 +37,7 @@ class SmsService {
         }
 
         let primaryOk = false;
+        let timedOut = false;
         for (let i = 0; i < recipients.length; i++) {
             const local = recipients[i];
             const formatNumber = toSmppNumber(local);
@@ -50,6 +51,10 @@ class SmsService {
                 if (result.success) {
                     log(`📱 SMPP SMS Sent successfully to ${formatNumber}`);
                     if (i === 0) primaryOk = true;
+                } else if (result.error === 'timeout') {
+                    // Submit went out; Libyana's ack was late. The handset often still gets the SMS.
+                    timedOut = true;
+                    log(`⏱️ SMPP ack timed out for ${formatNumber}; SMS may already be delivered`);
                 } else {
                     log(`❌ SMPP failed to send SMS to ${formatNumber}: ${result.error || JSON.stringify(result)}`);
                 }
@@ -57,7 +62,7 @@ class SmsService {
                 log(`❌ Error in sendOtpSms to ${formatNumber}: ${err.message}`);
             }
         }
-        return primaryOk;
+        return { ok: primaryOk, timedOut };
     }
 }
 module.exports = new SmsService();

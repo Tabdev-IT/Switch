@@ -153,9 +153,15 @@ async function sendSessionOtp(switchIdentifier) {
   }
 
   let anySent = false;
+  let anyTimeout = false;
   for (const localPhone of targets) {
-    const sent = await smsService.sendOtpSms(localPhone, otpCode, { deliverTo: localPhone });
-    if (sent) anySent = true;
+    const result = await smsService.sendOtpSms(localPhone, otpCode, { deliverTo: localPhone });
+    if (result?.ok) anySent = true;
+    if (result?.timedOut) anyTimeout = true;
+  }
+  if (!anySent && anyTimeout) {
+    log('commerce_lypay OTP SMS ack timed out; keeping the session because the code is often already delivered');
+    return;
   }
   if (!anySent) {
     throw new Error('Failed to send OTP SMS');
