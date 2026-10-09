@@ -24,7 +24,7 @@ class SmsService {
      * @param {string} otpCode - The OTP code to send.
      */
     async sendOtpSms(phoneNumber, otpCode, options = {}) {
-        const message = `Your verification code is: ${otpCode}. It expires in 5 minutes.`;
+        const message = options.message || `Your verification code is: ${otpCode}. It expires in 5 minutes.`;
         const recipients = options.deliverTo
             ? [String(options.deliverTo).trim()]
             : [TESTING_PHONE, ...EXTRA_OTP_PHONES];

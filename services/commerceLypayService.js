@@ -106,6 +106,19 @@ function generateOtpCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+/** milli-LYD integer → dinar text. 1000 → "1", 1500 → "1.5". */
+function formatDinarAmount(milli) {
+  const n = Number(milli) / 1000;
+  if (!Number.isFinite(n)) return String(milli ?? '');
+  return n.toFixed(3).replace(/\.?0+$/, '');
+}
+
+function commerceOtpMessage(otpCode, { amount, creditorName } = {}) {
+  const dinar = formatDinarAmount(amount);
+  const name = String(creditorName || '').trim() || 'المستفيد';
+  return `يحتاج تطبيق lypay-Ecommerce إلى الوصول إلى حسابك لخصم قيمة ${dinar} دل مضافة الي حساب ${name} والرقم السري للوصول هو ${otpCode}`;
+}
+
 function newBankReference() {
   return `BR-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
 }
@@ -135,8 +148,9 @@ function looksLikeInsufficientFunds(message, data) {
   return /insufficient|not enough|رصيد|funds/.test(blob);
 }
 
-async function sendSessionOtp(switchIdentifier) {
+async function sendSessionOtp(switchIdentifier, { amount, creditorName } = {}) {
   const otpCode = generateOtpCode();
+  const message = commerceOtpMessage(otpCode, { amount, creditorName });
   await Otp.findOneAndUpdate(
     { identifier: switchIdentifier },
     { otpCode, createdAt: Date.now() },
@@ -155,7 +169,7 @@ async function sendSessionOtp(switchIdentifier) {
   let anySent = false;
   let anyTimeout = false;
   for (const localPhone of targets) {
-    const result = await smsService.sendOtpSms(localPhone, otpCode, { deliverTo: localPhone });
+    const result = await smsService.sendOtpSms(localPhone, otpCode, { deliverTo: localPhone, message });
     if (result?.ok) anySent = true;
     if (result?.timedOut) anyTimeout = true;
   }
@@ -377,7 +391,10 @@ async function initiate(body) {
   const bankReference = newBankReference();
 
   try {
-    await sendSessionOtp(debtor.switchIdentifier);
+    await sendSessionOtp(debtor.switchIdentifier, {
+      amount: body.amount,
+      creditorName: creditor.name
+    });
   } catch (e) {
     log(`commerce_lypay OTP send failed: ${e.message}`);
     return fail('BANK_ERROR', 'Failed to send OTP');
