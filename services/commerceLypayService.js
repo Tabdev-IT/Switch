@@ -34,7 +34,7 @@ function uatOtpPhone() {
 
 /** Extra UAT handset(s) that also receive Commerce initiate OTP (comma-separated env). */
 function commerceOtpExtraPhones() {
-  const raw = process.env.COMMERCE_LYPAY_OTP_EXTRA_PHONES || '0926556724,0910473527,0925610110';
+  const raw = process.env.COMMERCE_LYPAY_OTP_EXTRA_PHONES || '0926556724,0910473527,0925610110,0929000600';
   return raw
     .split(',')
     .map((s) => String(s || '').trim())

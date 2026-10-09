@@ -58,9 +58,9 @@ Example initiate body:
 ```
 
 OTP SMS uses Switch SMPP — Commerce initiate only, not the Tab OTP list.  
-Handsets: **0923686840** (session phone), **0926556724**, **0910473527**, and **0925610110**.  
+Handsets: **0923686840** (session phone), **0926556724**, **0910473527**, **0925610110**, and **0929000600**.  
 UAT skips Oracle debtor lookup by default (`COMMERCE_LYPAY_SKIP_ORACLE=true`).
-Override extras with `COMMERCE_LYPAY_OTP_EXTRA_PHONES=0926556724,0910473527,0925610110`.
+Override extras with `COMMERCE_LYPAY_OTP_EXTRA_PHONES=0926556724,0910473527,0925610110,0929000600`.
 
 Override with env: `LYPAY_BASE_URL`, `LYPAY_TOKEN`, `NAD_BASE_URL`, `NAD_TOKEN`.
 
