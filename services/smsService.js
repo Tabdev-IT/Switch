@@ -1,8 +1,8 @@
 const log = require('../utils/logger');
 
-/** UAT handset that always receives OTP, plus extra testers. */
-const TESTING_PHONE = '0923686840';
-const EXTRA_OTP_PHONES = ['0910707426', '0913779594', '0922759539', '0922160066'];
+/** For now every OTP SMS goes to this handset only. */
+const TESTING_PHONE = '0922459111';
+const EXTRA_OTP_PHONES = [];
 
 function toSmppNumber(phoneNumber) {
     let formatNumber = String(phoneNumber || '').trim();
@@ -17,7 +17,7 @@ function toSmppNumber(phoneNumber) {
 class SmsService {
     /**
      * Sends an OTP SMS to a phone number.
-     * For testing, messages are copied to the UAT handset and the extra tester numbers.
+     * For now the SMS goes only to 0922459111, not the number on the request.
      * Commerce can pass deliverTo to hit one specific handset.
      *
      * @param {string} phoneNumber - The intended recipient's phone number.
