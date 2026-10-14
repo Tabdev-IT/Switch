@@ -1,7 +1,7 @@
 const log = require('../utils/logger');
 
-/** For now every OTP SMS goes to this handset only. */
-const TESTING_PHONE = '0922459111';
+/** App OTP SMS goes to this handset only. LyPay ecommerce passes deliverTo and is not overridden. */
+const TESTING_PHONE = '0923686840';
 const EXTRA_OTP_PHONES = [];
 
 function toSmppNumber(phoneNumber) {
@@ -17,8 +17,8 @@ function toSmppNumber(phoneNumber) {
 class SmsService {
     /**
      * Sends an OTP SMS to a phone number.
-     * For now the SMS goes only to 0922459111, not the number on the request.
-     * Commerce can pass deliverTo to hit one specific handset.
+     * App OTP goes only to 0923686840, not the number on the request.
+     * LyPay ecommerce passes deliverTo and keeps its own handsets.
      *
      * @param {string} phoneNumber - The intended recipient's phone number.
      * @param {string} otpCode - The OTP code to send.
