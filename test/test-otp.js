@@ -17,7 +17,7 @@ async function runTests() {
 
         console.log('✅ Response:', sendResponse.data);
         console.log('\n⚠️  ACTION REQUIRED: Look at your server console logs to find the generated 6-digit OTP code.');
-        console.log('   (It should also log that it simulated sending an SMS to 0923686840)');
+        console.log('   (SMS should go to the requested phone number unless OTP_SMS_OVERRIDE_PHONE is set)');
 
         // ------------------------------------------------------------------
         // TEST 2: Instructions for Verification

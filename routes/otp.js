@@ -32,7 +32,7 @@ router.post('/send', async (req, res) => {
             { upsert: true, new: true }
         );
 
-        // Send the SMS (ignores real phone number for testing)
+        // SMS goes to the requested phoneNumber (optional OTP_SMS_OVERRIDE_PHONE on Switch)
         await smsService.sendOtpSms(targetId, otpCode);
         if (isEmail(email)) {
             await sendOtpEmail(email, otpCode);

@@ -1,8 +1,11 @@
 const log = require('../utils/logger');
 
-/** App OTP SMS goes to this handset only. LyPay ecommerce passes deliverTo and is not overridden. */
-const TESTING_PHONE = '0923686840';
-const EXTRA_OTP_PHONES = [];
+/** Optional emergency override — set OTP_SMS_OVERRIDE_PHONE to force all app OTP to one handset. */
+const OVERRIDE_PHONE = String(process.env.OTP_SMS_OVERRIDE_PHONE || '').trim();
+const EXTRA_OTP_PHONES = String(process.env.OTP_SMS_EXTRA_PHONES || '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
 
 function toSmppNumber(phoneNumber) {
     let formatNumber = String(phoneNumber || '').trim();
@@ -14,22 +17,42 @@ function toSmppNumber(phoneNumber) {
     return formatNumber;
 }
 
+function toLocalPhone(phoneNumber) {
+    const digits = String(phoneNumber || '').replace(/\D/g, '');
+    if (digits.startsWith('218') && digits.length === 12) return `0${digits.slice(3)}`;
+    if (digits.startsWith('09') && digits.length === 10) return digits;
+    if (digits.startsWith('9') && digits.length === 9) return `0${digits}`;
+    return String(phoneNumber || '').trim();
+}
+
 class SmsService {
     /**
      * Sends an OTP SMS to a phone number.
-     * App OTP goes only to 0923686840, not the number on the request.
-     * LyPay ecommerce passes deliverTo and keeps its own handsets.
+     * Default: SMS goes to the requested phoneNumber.
+     * LyPay ecommerce can pass deliverTo to pin a specific handset.
+     * Set OTP_SMS_OVERRIDE_PHONE to force delivery to one test handset.
      *
      * @param {string} phoneNumber - The intended recipient's phone number.
      * @param {string} otpCode - The OTP code to send.
      */
     async sendOtpSms(phoneNumber, otpCode, options = {}) {
-        const message = options.message || `Your verification code is: ${otpCode}. It expires in 5 minutes.`;
+        // Default Arabic body for Tab app OTP. LyPay ecommerce passes its own `message` + `deliverTo`.
+        const message =
+            options.message ||
+            `رمز التحقق الخاص بك من مصرف التضامن هو: ${otpCode}. صالح لمدة 5 دقائق.`;
+        const intended = toLocalPhone(phoneNumber);
+        // deliverTo (ecommerce) always wins — OVERRIDE_PHONE only affects default app OTP path.
         const recipients = options.deliverTo
             ? [String(options.deliverTo).trim()]
-            : [TESTING_PHONE, ...EXTRA_OTP_PHONES];
+            : OVERRIDE_PHONE
+                ? [OVERRIDE_PHONE, ...EXTRA_OTP_PHONES]
+                : [intended, ...EXTRA_OTP_PHONES].filter(Boolean);
 
-        log(`[TESTING OVERRIDE] OTP for ${phoneNumber} → ${recipients.join(', ')}`);
+        if (OVERRIDE_PHONE) {
+            log(`[OTP OVERRIDE] OTP for ${phoneNumber} → ${recipients.join(', ')}`);
+        } else {
+            log(`OTP SMS for ${phoneNumber} → ${recipients.join(', ')}`);
+        }
 
         if (!global.smsManager) {
             log(`⚠️ global.smsManager is not initialized! Cannot send SMS physically. Please check server.js`);
