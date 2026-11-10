@@ -36,11 +36,10 @@ class SmsService {
      * @param {string} otpCode - The OTP code to send.
      */
     async sendOtpSms(phoneNumber, otpCode, options = {}) {
-        // Default Tab app OTP SMS: Arabic + English (app itself is Arabic-only for now).
-        // LyPay ecommerce can pass its own `message` + `deliverTo`.
+        // Default Arabic body for Tab app OTP. LyPay ecommerce passes its own `message` + `deliverTo`.
         const message =
             options.message ||
-            `رمز التحقق الخاص بك من مصرف التضامن هو: ${otpCode}\nYour Tadhamun Bank verification code is ${otpCode}`;
+            `رمز التحقق الخاص بك من مصرف التضامن هو: ${otpCode}`;
         const intended = toLocalPhone(phoneNumber);
         // deliverTo (ecommerce) always wins — OVERRIDE_PHONE only affects default app OTP path.
         const recipients = options.deliverTo
